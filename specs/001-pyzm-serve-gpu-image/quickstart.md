@@ -374,18 +374,47 @@ Checks that do not need a volunteer:
 
 ```bash
 # The whole tracked tree, not a hand-picked handful of files.
-grep -rIiE "jantman|192\.168\.|10\.0\.|bigserver|/home/" \
+grep -rIiE "192\.168\.|10\.0\.|bigserver|/home/" \
   --exclude-dir=.git --exclude-dir=specs .
 
-# ...and the built image's own environment and labels, which no file grep reaches.
-docker image inspect pyzm-serve:local \
-  --format '{{json .Config.Env}}{{json .Config.Labels}}' \
-  | grep -iE "jantman|192\.168\.|10\.0\.|bigserver|/home/" || echo "image clean"
+# The image's own ENV. No exemptions here: nothing in the runtime environment should
+# ever name a person, a host or a path from the author's network.
+docker image inspect "$IMAGE" --format '{{json .Config.Env}}' \
+  | grep -iE "jantman|192\.168\.|10\.0\.|bigserver|/home/" && echo "LEAK IN ENV" || echo "env clean"
+
+# The image's labels, EXEMPTING the two OCI labels that are required to name the
+# source repository. See the note below for why this exemption is not a loophole.
+docker image inspect "$IMAGE" --format '{{json .Config.Labels}}' | python3 -c '
+import json, re, sys
+labels = json.load(sys.stdin) or {}
+exempt = {"org.opencontainers.image.source", "org.opencontainers.image.url"}
+pat = re.compile(r"jantman|192\.168\.|10\.0\.|bigserver|/home/", re.I)
+bad = {k: v for k, v in labels.items() if k not in exempt and pat.search(str(v))}
+print("LEAK IN LABELS:", bad) if bad else print("labels clean")'
 ```
 
-**Expected**: no matches, and `image clean` — no author-specific values anywhere (FR-032, SC-012).
-FR-032 says "anywhere in the repository or image"; `scripts/`, `.github/workflows/`, `models/` and
-the image's `ENV` defaults are all places a hostname can hide from a four-file grep.
+**Expected**: no file matches, `env clean`, and `labels clean` (FR-032, SC-012).
+
+**Two exemptions, and why neither is a loophole.**
+
+The owner name is not an author-specific *value* in FR-032's sense — that clause is about
+hostnames, IP addresses, local paths, credentials and hardware assumptions from the author's
+network. It is the project's public identity, and two places are *required* to carry it:
+
+- `org.opencontainers.image.source` and `.url` **must** point at the source repository. FR-025
+  mandates those labels; a published image that omitted them would violate Principle IV. So the
+  label check exempts exactly those two keys — and only those two, by name, so a hostname
+  hiding in any other label is still caught.
+- `README.md` and `docker-compose.yml` must give a **copy-pasteable** `ghcr.io/<owner>/...`
+  reference, because FR-029 and SC-005 promise a stranger can run this from the README alone.
+  A `<owner>` placeholder would fail that promise. The tracked-tree grep therefore drops the
+  owner name from its pattern and keeps every genuinely site-specific pattern.
+
+This was found by running the check against a real published image rather than a local build:
+the local build has no OCI labels at all, so the naive one-liner passed locally and failed on
+the artifact users actually pull. A check that cannot pass on a compliant artifact gets waved
+through, and then it is protecting nothing — the same reasoning that produced constitution
+v1.2.0.
 
 The README must also contain: a repostatus badge; the best-effort support statement; the supported
 GPU generations; the models shipped; the full environment-variable table; the image download size;
