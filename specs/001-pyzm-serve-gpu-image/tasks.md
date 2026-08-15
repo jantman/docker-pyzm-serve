@@ -124,7 +124,7 @@ pretending independence.
 - [X] T033 [US2] Add the GitHub release step to `release.yml`, gated on the verification job so a release is never presented as usable without it (FR-026). Use a maintained action — `actions/create-release` is archived
 - [X] T034 [US2] Add a **Releasing** section at the bottom of `README.md` defining the release-note convention that FR-028 requires: releases are cut by pushing a git tag, the image tag equals the git tag, and the notes MUST explicitly call out any of the four breaking changes — a removed model, a changed default, a dropped GPU generation, or a new required setting — together with the version bump that signals it. State that a user must be able to judge from the tag alone whether an upgrade is safe, that a published tag is never moved or deleted, and that a release is not confirmed until it has been pulled and verified on real GPU hardware. Append-only: if Phase 6 has not run yet, this section can exist before the rest of the README is written
 - [X] T035 [US2] Set an explicit `timeout-minutes` below the 6-hour hard cap on every job in `release.yml`, so a runaway OpenCV build fails as a legible timeout rather than being killed at the ceiling (research R8)
-- [ ] T036 [US2] Verify with a throwaway tag per quickstart Scenario 7: correct tag published, verification job ran, release created, four OCI labels plus SBOM and provenance present, no Docker Hub push, and — re-running the workflow for that same tag — the guard job (T030a) fails the run before the build and the tag's digest is unchanged (FR-021 to FR-026, SC-004)
+- [X] T036 [US2] Verify with a throwaway tag per quickstart Scenario 7: correct tag published, verification job ran, release created, four OCI labels plus SBOM and provenance present, no Docker Hub push, and — re-running the workflow for that same tag — the guard job (T030a) fails the run before the build and the tag's digest is unchanged (FR-021 to FR-026, SC-004)
 
 **Checkpoint**: Releases are immutable, verified, and reproducible by anyone who forks the repository.
 
@@ -144,8 +144,8 @@ the spec's priority reflects value, not build order.
 
 - [X] T037 [US3] Create `.github/workflows/build.yml` triggered on push to `main` and `workflow_dispatch`, with `permissions: {packages: write}` only, publishing `main-build${{ github.run_id }}-${{ github.sha }}` — a tag whose prefix and run ID make collision with a release tag impossible (FR-022, RT-1)
 - [X] T038 [US3] Give `build.yml` the same labels, SBOM, provenance, registry cache and `timeout-minutes` as `release.yml`, so a `main` build is a faithful rehearsal of a release build and differs only in what it is called
-- [ ] T039 [US3] Verify the failure path: push a commit that breaks the GPU build (for example forcing `OPENCV_CUDA=OFF`), confirm the pipeline fails and publishes nothing, then revert (FR-022, SC-003)
-- [ ] T040 [US3] Verify `workflow_dispatch` triggers an identical build and publish with no code change (User Story 3, scenario 4)
+- [X] T039 [US3] Verify the failure path: push a commit that breaks the GPU build (for example forcing `OPENCV_CUDA=OFF`), confirm the pipeline fails and publishes nothing, then revert (FR-022, SC-003)
+- [X] T040 [US3] Verify `workflow_dispatch` triggers an identical build and publish with no code change (User Story 3, scenario 4)
 
 **Checkpoint**: Mistakes surface on push instead of at release time, after a multi-hour build.
 

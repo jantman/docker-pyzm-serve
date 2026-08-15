@@ -40,14 +40,43 @@ jobs:
     timeout-minutes: 10
     outputs:
       image: ${{ steps.names.outputs.image }}
+      tags: ${{ steps.names.outputs.tags }}
+      prerelease: ${{ steps.names.outputs.prerelease }}
     steps:
-      - name: Compute image name
+      - name: Compute image name and tag list
         id: names
         run: |
           # GHCR requires a lowercase path. github.repository preserves the owner's case.
           image="${REGISTRY}/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           echo "image=${image}" >> "${GITHUB_OUTPUT}"
           echo "Image repository: ${image}"
+
+          # A semver PRE-RELEASE is anything with a suffix after the version core --
+          # v0.1.0-rc1, v0.0.1-test. Those must NOT become `latest`, and must be marked
+          # as prereleases on GitHub.
+          #
+          # This is not cosmetic. Without it a throwaway test tag becomes both the
+          # repository's headline "Latest release" and whatever `docker pull ...:latest`
+          # returns -- which is how v0.0.1-test briefly presented itself as this project's
+          # newest usable image. `latest` is never a recommended deployment target
+          # (FR-024), but it must still not point at something that was never meant to be
+          # deployed at all.
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prerelease=false
+          else
+            prerelease=true
+          fi
+          echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
+          echo "Pre-release: ${prerelease}"
+
+          {
+            echo "tags<<TAGS_EOF"
+            echo "${image}:${GITHUB_REF_NAME}"
+            if [ "${prerelease}" = "false" ]; then
+              echo "${image}:latest"
+            fi
+            echo "TAGS_EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
@@ -152,9 +181,9 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ needs.guard.outputs.image }}:${{ github.ref_name }}
-            ${{ needs.guard.outputs.image }}:latest
+          # Computed by the guard job: always the version tag, plus `latest` only for a
+          # real release. A pre-release tag never becomes `latest`.
+          tags: ${{ needs.guard.outputs.tags }}
           labels: |
             org.opencontainers.image.url=https://github.com/${{ github.repository }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
@@ -230,6 +259,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           IMAGE: ${{ needs.guard.outputs.image }}
           DIGEST: ${{ needs.build.outputs.digest }}
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
         run: |
           set -euo pipefail
           {
@@ -266,7 +296,17 @@ jobs:
             echo "be able to judge from the tag alone whether an upgrade is safe."
           } > release-notes.md
 
+          # --prerelease keeps a pre-release tag from being presented as the repository's
+          # headline "Latest release". Users judge whether an upgrade is safe from the tag
+          # (FR-028, Principle IV); a test tag sitting at the top of the releases page
+          # actively works against that.
+          prerelease_flag=""
+          if [ "${PRERELEASE}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+
           gh release create "${TAG}" \
             --title "${TAG}" \
             --notes-file release-notes.md \
-            --verify-tag
+            --verify-tag \
+            ${prerelease_flag}
