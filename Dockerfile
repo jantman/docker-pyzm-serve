@@ -88,7 +88,7 @@ ARG CUDA_ARCH_PTX="8.9"
 # FAILS at scripts/assert-cuda-build.py -- quickstart Scenario 1, T024. A gate nobody has
 # watched fail is not known to work, and that is precisely what cost the predecessor stack
 # a year of CPU inference.
-ARG OPENCV_CUDA=ON
+ARG OPENCV_CUDA=OFF
 
 
 # =============================================================================
