@@ -1,0 +1,88 @@
+# Worked example: GPU-accelerated pyzm.serve inference gateway.
+#
+# Copy this file, change the image tag to the release you want, and `docker compose up -d`.
+#
+# Requires on the host:
+#   - an NVIDIA GPU of compute capability 6.1 or newer (Pascal onwards)
+#   - an NVIDIA driver of the 550 branch or newer
+#   - the NVIDIA Container Toolkit
+#
+# Note what is NOT here: no volumes, no config file, no model download step, no bind mount.
+# The image ships every model it serves and needs no network access after it is pulled
+# (Constitution Principle VI). If you find yourself having to add a volume to make this
+# work at all, that is a bug -- please open an issue.
+
+services:
+  pyzm-serve:
+    # Pin a release tag, or better, a digest. Do NOT deploy `latest`: it moves.
+    # Available releases: https://github.com/jantman/docker-pyzm-serve/releases
+    image: ghcr.io/jantman/docker-pyzm-serve:v0.1.0
+
+    container_name: pyzm-serve
+    restart: unless-stopped
+
+    ports:
+      # host:container. Change only the host side; PYZM_SERVE_PORT changes the container
+      # side, and the healthcheck follows it automatically.
+      - "5000:5000"
+
+    # GPU reservation. This is the Compose equivalent of `docker run --gpus all`.
+    # Without it the container exits 78 at start with a diagnostic rather than silently
+    # serving CPU inference -- which is the entire point of this image.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      # --- The two defaults that differ from upstream pyzm.serve ---------------
+      # Shown explicitly here so there is no surprise for anyone arriving from
+      # upstream's documentation. Both are already the image's defaults.
+      PYZM_SERVE_PROCESSOR: gpu        # upstream defaults to cpu
+      PYZM_SERVE_MODELS: yolo11m       # upstream defaults to yolo11s
+
+      # --- Everything below is optional; the values shown are the defaults -----
+      # PYZM_SERVE_PORT: "5000"
+      # PYZM_SERVE_HOST: "0.0.0.0"
+      # PYZM_SERVE_WORKERS: "1"        # >1 multiplies VRAM with no GPU throughput gain
+      # PYZM_SERVE_DEBUG: "1"          # any non-empty value enables debug logging
+
+      # --- Authentication is OFF by default -----------------------------------
+      # With auth off, this gateway answers any request that reaches its port. That is a
+      # reasonable default on a trusted network segment shared with its client, and a bad
+      # one on anything else. To turn it on, set ALL THREE of these -- the container
+      # refuses to start with auth enabled and either of the last two missing, rather than
+      # signing tokens with upstream's published 'change-me' default.
+      # PYZM_SERVE_AUTH: "1"
+      # PYZM_SERVE_AUTH_USER: "admin"
+      # PYZM_SERVE_AUTH_PASSWORD: "choose-a-real-password"
+      # PYZM_SERVE_TOKEN_SECRET: "output of: openssl rand -hex 32"
+
+      # --- Escape hatch: run without a GPU ------------------------------------
+      # Turns the "no CUDA device visible" refusal into a loud warning. Inference then runs
+      # on the CPU, roughly an order of magnitude slower. Useful for trying the image out;
+      # not a deployment configuration.
+      # PYZM_SERVE_ALLOW_CPU: "1"
+      # PYZM_SERVE_PROCESSOR: cpu
+
+    # The image already defines a HEALTHCHECK against /health on the configured port, with
+    # a start period long enough for model load (including first-load PTX JIT on a GPU
+    # newer than any this image was compiled for). It is repeated here only so that
+    # `docker compose ps` shows health without you having to look it up.
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import os, urllib.request, sys
+          port = os.environ.get("PYZM_SERVE_PORT", "5000")
+          sys.exit(0 if urllib.request.urlopen(
+              "http://127.0.0.1:" + port + "/health", timeout=8).status == 200 else 1)
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3

@@ -1,0 +1,97 @@
+# Build: every push to main is published under a tag nobody could mistake for a release.
+#
+# This is a faithful rehearsal of release.yml -- same base image, same labels, same SBOM and
+# provenance, same registry cache, same timeout. It differs in exactly two ways, both
+# intentional:
+#
+#   1. What the image is CALLED. `main-build<run_id>-<sha>` embeds both the run ID and the
+#      commit, so a development tag can never collide with a release tag or with another
+#      development tag (RT-1, FR-022).
+#   2. No pull-back verification job and no GitHub release. FR-010 scopes the pull-back
+#      re-assertion to releases, where the immutability promise is actually made.
+#
+# The build-time CUDA assertion still runs, because it lives in the Dockerfile rather than
+# in a workflow. That is the point of putting it there: a change that breaks the GPU path
+# fails HERE, on push, rather than at release time after a multi-hour build (FR-022,
+# SC-003).
+#
+# No repository secret is required. GITHUB_TOKEN authenticates to GHCR.
+
+name: build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# packages: write only. Unlike release.yml this creates no GitHub release, so it has no
+# business writing repository contents.
+permissions:
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Build and push (development tag)
+    runs-on: ubuntu-latest
+    # Same budget as release.yml, and for the same reason: a runaway OpenCV compile should
+    # fail as a legible timeout rather than be killed at the 6-hour hard cap (research R8).
+    timeout-minutes: 330
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name and development tag
+        id: names
+        run: |
+          # GHCR requires a lowercase path; github.repository preserves the owner's case.
+          image="${REGISTRY}/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          tag="main-build${GITHUB_RUN_ID}-${GITHUB_SHA}"
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}"     >> "${GITHUB_OUTPUT}"
+          echo "Will publish ${image}:${tag}"
+
+      # linux/amd64 only, no QEMU -- identical to release.yml (FR-020).
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          # One tag only. No `latest`: that belongs to releases, and a main build must
+          # never be reachable under a name someone might deploy by habit.
+          tags: ${{ steps.names.outputs.image }}:${{ steps.names.outputs.tag }}
+          labels: |
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.names.outputs.tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+          # The same mutable `buildcache` tag release.yml uses, on purpose: a main build
+          # warms the cache a release build then hits. It holds BuildKit layer manifests,
+          # not a runnable image (RT-2).
+          cache-from: type=registry,ref=${{ steps.names.outputs.image }}:buildcache
+          cache-to: type=registry,ref=${{ steps.names.outputs.image }}:buildcache,mode=max
+
+      - name: Report what was published
+        run: |
+          echo "Published ${{ steps.names.outputs.image }}:${{ steps.names.outputs.tag }}"
+          echo "Digest: ${{ steps.build.outputs.digest }}"
+          echo ""
+          echo "This is a DEVELOPMENT tag. It has not been pulled back and re-verified, and"
+          echo "there is no GitHub release for it. Use a v<semver> tag to deploy."

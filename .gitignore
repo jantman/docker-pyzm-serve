@@ -1,0 +1,30 @@
+# Local build scratch.
+#
+# Keep this list in step with .dockerignore's model-binary section. The same artifacts must
+# be invisible to both git and the Docker build context; an artifact that appears in only
+# one of the two lists is the exact failure mode this pairing exists to prevent.
+#
+# What IS committed is models/checksums.sha256. The checksums are the pinned record (PI-3);
+# the binaries they describe are fetched and verified at build time (FR-014), never stored
+# here.
+
+# --- Model binaries (downloaded locally only to compute checksums) ---------------
+*.pt
+*.onnx
+*.weights
+
+# --- Sample images used by the quickstart verification scenarios ------------------
+sample.jpg
+sample.png
+
+# --- Python scratch ---------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Editor and OS ---------------------------------------------------------------
+*.log
+*.tmp
+*.swp
+.DS_Store

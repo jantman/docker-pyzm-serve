@@ -1,0 +1,51 @@
+# Build context exclusions.
+#
+# Two distinct jobs, both load-bearing:
+#
+# 1. Keep documentation churn out of the context. The context digest is what BuildKit
+#    compares to decide whether a stage is still valid, so a README edit that reaches the
+#    context can invalidate the multi-hour OpenCV CUDA compile (FR-019).
+# 2. Keep downloaded model binaries out of the context. Several hundred MB of .pt/.weights
+#    may exist locally from computing checksums (see models/checksums.sha256); the build
+#    fetches and verifies its own copies, so uploading these would add minutes to every
+#    `docker build` for nothing.
+#
+# NOTE: `scripts/` and `models/` must NOT be excluded. The Dockerfile COPYs
+# scripts/assert-cuda-build.py, scripts/export-onnx.py, models/checksums.sha256,
+# models/yolov4.cfg and models/coco.names as build inputs.
+
+# --- Version control and tooling -------------------------------------------------
+.git/
+.gitignore
+.github/
+
+# --- Specification and agent tooling ---------------------------------------------
+specs/
+.specify/
+.claude/
+
+# --- Documentation ---------------------------------------------------------------
+# `**/*.md` rather than `*.md`: the bare form matches only the context root, so
+# `models/README.md` would still be sent.
+**/*.md
+LICENSE
+
+# --- Compose / local run files ---------------------------------------------------
+docker-compose.yml
+docker-compose.*.yml
+
+# --- Downloaded model binaries (fetched and verified inside the build instead) ----
+**/*.pt
+**/*.onnx
+**/*.weights
+sample.*
+
+# --- Local scratch ---------------------------------------------------------------
+**/__pycache__/
+**/*.pyc
+.venv/
+venv/
+*.log
+*.tmp
+*.swp
+.DS_Store
