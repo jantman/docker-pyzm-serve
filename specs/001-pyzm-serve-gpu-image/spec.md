@@ -238,9 +238,12 @@ asking a question.
   source-built one in the final image, regardless of how it was introduced. The mechanism that
   prevents this MUST be documented in place, in the build definition, with an explanation of the
   silent failure it prevents.
-- **FR-010**: After publishing, the pipeline MUST independently re-verify the published artifact by
-  retrieving it from the registry and re-running the compiled-with-CUDA assertion against it. A
-  failure here MUST fail the pipeline visibly.
+- **FR-010**: After publishing a **release** image, the pipeline MUST independently re-verify the
+  published artifact by retrieving it from the registry and re-running the compiled-with-CUDA
+  assertion against it. A failure here MUST fail the pipeline visibly. Development builds from the
+  default branch are exempt: they publish under a tag nobody may pin (FR-022), and the build-time
+  assertion of FR-008 is the gate that matters for them. SC-004 scopes the same obligation to
+  release images for this reason.
 - **FR-011**: A log line stating which processor was *requested* MUST NOT be treated as evidence of
   which was *used*. No verification may pass under conditions where the GPU is idle.
 - **FR-012**: The documentation MUST give a copy-pasteable command that an operator runs on their own

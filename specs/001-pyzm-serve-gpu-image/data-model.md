@@ -178,8 +178,11 @@ Operator-supplied settings. Environment variables only — no configuration file
   (FR-032's sibling concern: no surprises, no hidden site-specific tuning.)
 - **RC-2**: With `PYZM_SERVE_PROCESSOR=gpu` and no visible CUDA device, the entrypoint exits
   non-zero with a diagnostic naming `--gpus all` — unless `PYZM_SERVE_ALLOW_CPU=1`. (FR-004, R7)
-- **RC-3**: With auth enabled and no `PYZM_SERVE_TOKEN_SECRET`, the entrypoint refuses to start
-  rather than signing tokens with upstream's published `change-me` default. (FR-007)
+- **RC-3**: With auth enabled and either `PYZM_SERVE_TOKEN_SECRET` or `PYZM_SERVE_AUTH_PASSWORD`
+  unset, the entrypoint refuses to start, naming the missing variable — rather than signing tokens
+  with upstream's published `change-me` default or accepting whatever password upstream falls back
+  to. Both are marked required-when-auth-on in the container contract and neither has a default
+  here. (FR-007)
 - **RC-4**: Arguments passed after the image name are appended to the server command line, so the
   table is a convenience, never a cage.
 - **RC-5**: No variable may carry an author-specific default. (FR-032)

@@ -114,6 +114,7 @@ and not an HTTP concern — it decides whether the process starts at all.
 | `1` | Server exited with an error | Upstream's message |
 | `78` | GPU requested, no CUDA device visible | "…did you pass `--gpus all`?" — suppressed to a warning by `PYZM_SERVE_ALLOW_CPU=1` |
 | `78` | Auth enabled without `PYZM_SERVE_TOKEN_SECRET` | Refuses to sign tokens with upstream's published `change-me` default |
+| `78` | Auth enabled without `PYZM_SERVE_AUTH_PASSWORD` | Names the missing variable. An authenticated endpoint whose credentials come from someone else's source tree is worse than an open one, because the operator believes it is protected |
 
 *Why this exists*: upstream cannot detect a CUDA-less OpenCV — `setPreferableBackend(DNN_BACKEND_CUDA)`
 succeeds on a CPU-only build and inference silently falls back, with no log line to grep for

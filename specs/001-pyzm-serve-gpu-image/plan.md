@@ -123,7 +123,8 @@ specs/001-pyzm-serve-gpu-image/
 ├── Dockerfile                  # Multi-stage: opencv-build → model-export → runtime
 ├── docker-compose.yml          # Worked example with GPU reservation (FR-031)
 ├── entrypoint.sh               # Env → upstream CLI flags; GPU preflight (R7)
-├── .dockerignore
+├── .dockerignore               # Keeps doc churn and downloaded model binaries out of the context
+├── .gitignore                  # Keeps those same downloaded binaries out of git
 ├── README.md                   # Badge, honest framing, quickstart, GPU verification (FR-029/030)
 ├── LICENSE                     # Already present
 ├── models/

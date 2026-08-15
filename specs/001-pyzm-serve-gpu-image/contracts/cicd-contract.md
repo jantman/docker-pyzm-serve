@@ -14,8 +14,9 @@ What the pipeline promises, to the maintainer and to anyone pulling a tag. Deriv
 | Trigger | push to `main`; `workflow_dispatch` | push of a tag |
 | Publishes | `main-build<run_id>-<sha>` | `v<semver>` **and** `latest` |
 | Mutable output? | no | `latest` only |
+| Tag-already-exists guard | n/a — the run ID makes collision impossible | **yes — first job, blocks the build** |
 | Build-time CUDA assertion | yes (in the Dockerfile) | yes |
-| Pull-back verification | no | **yes — separate job** |
+| Pull-back verification | no (FR-010 scopes it to releases) | **yes — separate job** |
 | GitHub release | no | yes |
 
 Two files rather than one keyed on ref type: "publish something to try" and "make a permanent
@@ -100,7 +101,12 @@ final step is an operator decision, not an agent's.
 ## 6. Immutability
 
 - A release tag is written once. Workflows must never overwrite, move, or delete one (FR-024).
-- Re-running `release.yml` for an existing tag must not move it.
+- Re-running `release.yml` for an existing tag must not move it. **This is enforced, not assumed**:
+  the first job in `release.yml` inspects the registry for the pushed tag and fails the run before
+  anything is built if it is already published. Nothing else provides this — GHCR accepts a second
+  push to an existing tag silently, and `docker/build-push-action` has no opinion about it. Since
+  this build is not bit-reproducible, an unguarded re-run would replace a pinned image with a
+  different one under the same name.
 - `latest` moves on release. No documentation may present it as a deployment target.
 - Development tags embed both the run ID and the commit SHA, so they cannot collide with each other
   or with a release tag.

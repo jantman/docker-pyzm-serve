@@ -49,11 +49,26 @@ the OpenCV in the image reports no CUDA support. Nothing is tagged.
 > Run this deliberately at least once per significant Dockerfile change. The predecessor's year-long
 > CPU bug existed because nobody ever checked that the check worked.
 
+The **checksum** gate deserves the same treatment (FR-014):
+
+```bash
+# Corrupt one recorded checksum, confirm the build refuses, then restore it.
+cp models/checksums.sha256 /tmp/checksums.bak
+sed -i '1s/^./0/' models/checksums.sha256
+docker build -t pyzm-serve:should-fail . ; echo "exit=$?"
+cp /tmp/checksums.bak models/checksums.sha256
+```
+
+**Expected**: non-zero exit, failing at the model verification step with a message naming the
+artifact whose checksum did not match. A model that changes silently produces detection differences
+indistinguishable from a code regression, and this gate is the only thing between a user and that.
+
 ---
 
 ## Scenario 2 — The image is self-contained
 
-*Validates FR-033, FR-034, SC-013. Constitution Principle VI.*
+*Validates FR-013 (serves offline), FR-018, FR-033, FR-034, SC-013, SC-014. Constitution
+Principle VI.*
 
 ```bash
 docker run --rm --network none pyzm-serve:local \
@@ -83,6 +98,52 @@ done | sort | uniq -c
 ```
 
 **Expected**: every line counted exactly twice — identical model sets and checksums.
+
+### 2c — it actually *serves* offline
+
+The checks above prove the files are present. This one proves the image does its job with nothing
+outside it, which is what Principle VI actually claims. `--network none` makes published ports
+impossible, so drive it from inside the container (there is no `curl` in the runtime image, so use
+Python):
+
+```bash
+docker run -d --name pyzm-offline --network none \
+  -e PYZM_SERVE_PROCESSOR=cpu -e PYZM_SERVE_ALLOW_CPU=1 pyzm-serve:local
+docker cp sample.jpg pyzm-offline:/tmp/sample.jpg
+
+docker exec pyzm-offline python3 - <<'PY'
+import json, time, urllib.request
+
+for _ in range(60):                                    # become healthy
+    try:
+        h = urllib.request.urlopen("http://127.0.0.1:5000/health").read()
+        print("health:", h); break
+    except Exception:
+        time.sleep(5)
+else:
+    raise SystemExit("never became healthy with no network")
+
+b = b"--X\r\n"                                          # answer an inference request
+b += b'Content-Disposition: form-data; name="type"\r\n\r\nobject\r\n--X\r\n'
+b += b'Content-Disposition: form-data; name="image"; filename="s.jpg"\r\n\r\n'
+b += open("/tmp/sample.jpg", "rb").read() + b"\r\n--X--\r\n"
+r = urllib.request.Request("http://127.0.0.1:5000/infer", data=b,
+                           headers={"Content-Type": "multipart/form-data; boundary=X"})
+print("infer:", json.load(urllib.request.urlopen(r)))
+PY
+
+docker rm -f pyzm-offline
+```
+
+**Expected**: `{"status": "ok", "models_loaded": true}` followed by a `detections` array — with no
+network and no volumes. CPU is correct here: the claim under test is self-containment, not GPU
+execution.
+
+> This is the test Principle VI names for itself — *"The image MUST start, become healthy, and
+> answer an inference request with no network access and no volumes mounted. This is the test of
+> this principle, and it is cheap enough to run every time."* Listing model files offline is not
+> that test. A tag that needs the network to start is a recipe rather than a version, and it fails
+> precisely during a recovery, when it is least affordable.
 
 ---
 
@@ -134,6 +195,18 @@ curl -sf localhost:5001/models | python3 -m json.tool
 
 **Expected**: `yolo11m` present, `"loaded": true`. `yolo11s` and `yolov4` absent — present on disk
 but not requested (MA-2).
+
+The HTTP surface must be exactly upstream's — nothing added, removed, or renamed (FR-002, SC-010,
+Principle III). This check needs no GPU; run it against any started container:
+
+```bash
+curl -sf localhost:5001/openapi.json | python3 -c \
+  "import json,sys; print(sorted(json.load(sys.stdin)['paths']))"
+```
+
+**Expected**: exactly the upstream routes — health, model listing, inference and login — and no
+others. SC-010 promises that a client written against upstream works here unmodified; this is the
+only thing that checks it, and a negative requirement nobody checks is a hope.
 
 Inference:
 
@@ -260,12 +333,20 @@ docker image inspect ghcr.io/<owner>/docker-pyzm-serve:v0.0.1-test \
 **Expected**: the four OCI labels with the correct source, revision and version, plus SBOM and
 provenance attestations.
 
-Confirm immutability (FR-024, PIm-1) by re-running the release workflow for the existing tag and
-verifying the digest is unchanged:
+Confirm immutability (FR-024, PIm-1). Record the digest, re-run the release workflow for the tag
+that already exists, and check both that the run **failed at the guard job** and that the digest did
+not move:
 
 ```bash
 docker buildx imagetools inspect ghcr.io/<owner>/docker-pyzm-serve:v0.0.1-test --format '{{.Manifest.Digest}}'
+# re-run release.yml for v0.0.1-test from the Actions UI, then:
+docker buildx imagetools inspect ghcr.io/<owner>/docker-pyzm-serve:v0.0.1-test --format '{{.Manifest.Digest}}'
 ```
+
+**Expected**: the workflow stops at the tag-immutability guard before building anything, and the two
+digests are identical. Note that the guard is what makes this pass — this build is not
+bit-reproducible, so without it a re-run would push a *different* image to the same tag and the
+digests would differ. GHCR accepts that silently.
 
 ---
 
@@ -280,10 +361,19 @@ a question.
 Checks that do not need a volunteer:
 
 ```bash
-grep -riE "jantman|192\.168\.|10\.0\.|bigserver|/home/" README.md docker-compose.yml Dockerfile entrypoint.sh
+# The whole tracked tree, not a hand-picked handful of files.
+grep -rIiE "jantman|192\.168\.|10\.0\.|bigserver|/home/" \
+  --exclude-dir=.git --exclude-dir=specs .
+
+# ...and the built image's own environment and labels, which no file grep reaches.
+docker image inspect pyzm-serve:local \
+  --format '{{json .Config.Env}}{{json .Config.Labels}}' \
+  | grep -iE "jantman|192\.168\.|10\.0\.|bigserver|/home/" || echo "image clean"
 ```
 
-**Expected**: no matches — no author-specific values anywhere (FR-032, SC-012).
+**Expected**: no matches, and `image clean` — no author-specific values anywhere (FR-032, SC-012).
+FR-032 says "anywhere in the repository or image"; `scripts/`, `.github/workflows/`, `models/` and
+the image's `ENV` defaults are all places a hostname can hide from a four-file grep.
 
 The README must also contain: a repostatus badge; the best-effort support statement; the supported
 GPU generations; the models shipped; the full environment-variable table; the image download size;
