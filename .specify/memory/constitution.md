@@ -1,50 +1,253 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+==================
+Version change: (none) → 1.0.0
+Rationale: Initial ratification. The repository was created from `specify init` with an
+unpopulated scaffold; this is the first constitution. It supersedes an uncommitted draft that
+mischaracterised the project as a private, single-consumer image; no version bump applies
+because that draft was never ratified.
+
+Principles defined:
+  I.   Prove the GPU Path, Never Assume It (NON-NEGOTIABLE)
+  II.  Pin Everything
+  III. The Server Is a Dumb Inference Engine
+  IV.  Releases Are Immutable Promises
+  V.   Public, Personal, Best-Effort
+
+Sections defined:
+  - Build & Runtime Constraints
+  - Development Workflow
+  - Governance
+
+Corrections against the uncommitted draft, recorded because they change several principles:
+  - The project is public open source intended for use by strangers, not an appliance built for
+    one machine. Principle V was rewritten from "One Operator, One Purpose".
+  - Building for several CUDA compute capabilities is a requirement, not a YAGNI exception:
+    other users have other GPUs. Moved out of Principle V into Build & Runtime Constraints.
+  - `privatepuppet`'s contracts/container-images.md is one consumer's integration test, not this
+    project's acceptance surface. Governance and Development Workflow adjusted.
+
+Deferred by decision, not oversight:
+  - Base image family (Debian + NVIDIA apt repo vs. an nvidia/cuda Ubuntu tag) is an
+    implementation choice for the first feature spec. The constitution constrains only that
+    whatever is chosen is pinned to an exact immutable tag.
+
+RATIFICATION_DATE 2026-08-15 (date of first adoption).
+-->
+
+# docker-pyzm-serve Constitution
+
+This repository builds one container image: `python -m pyzm.serve`, the ML inference gateway for
+ZoneMinder object detection, running on a GPU. It is the successor to `jantman/docker-zm-mlapi`,
+whose Dockerfile still carries the TODO this project exists to resolve — *"replace python3-opencv
+with OpenCV > 4.3 with GPU support"*.
+
+It is a **public, personal, best-effort open source project**. It is maintained by one person for
+their own use, and it is explicitly intended to be usable by other people running ZoneMinder with
+an NVIDIA GPU. Those two facts are in tension, and every principle below is an attempt to hold
+both: build the thing the author needs, but never in a way that quietly assumes the author's
+hardware, network, or habits.
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Prove the GPU Path, Never Assume It (NON-NEGOTIABLE)
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+The image MUST NOT be buildable, publishable, or deployable without positive evidence that GPU
+inference is actually possible.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+- The Dockerfile MUST assert, in a `RUN` step that fails the build, that
+  `cv2.getBuildInformation()` reports CUDA support. This works on a GPU-less CI runner because it
+  proves what was *compiled*, not what is *available*.
+- CI MUST independently re-verify the published artifact after the build. The Dockerfile
+  assertion guards the source; the CI check guards against a bad layer cache hit, a registry
+  mixup, or a tag pointing at something other than what was just built.
+- Runtime GPU verification — `cv2.cuda.getCudaEnabledDeviceCount()` returning non-zero, and
+  `nvidia-smi` showing utilisation during inference — requires a real GPU and therefore belongs
+  to whoever deploys it. The README MUST document exactly how to check, as a copy-pasteable
+  command, because a user who cannot easily verify will assume it works.
+- A log line stating which processor was *requested* is NOT evidence of which was *used*. Any
+  check that could pass while the GPU sits idle is not a check.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+*Rationale:* The stack this replaces ran every frame on the CPU for over a year without anyone
+noticing, because a PyPI `opencv-python` wheel silently shadowed a CUDA-enabled build and pyzm
+logged `processor:gpu` for a request that had fallen back. That failure is worse for a stranger
+than it was for the author: they have no reason to suspect it, and the symptom is merely that
+detection feels slow. Shipping an image that *might* be using the GPU is the single most harmful
+thing this project could do to the people who install it.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### II. Pin Everything
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+Every input to the image MUST be pinned to an exact, immutable identifier.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+- The base image MUST be pinned to an exact tag; a digest is preferred. Never `latest`, never a
+  floating major or minor.
+- Upstream source checkouts (pyzmNg, and anything else built from git) MUST be pinned to a full
+  commit SHA, supplied as a build `ARG` — the pattern already used by `docker-zm-mlapi`'s
+  `PYZM_REF` and `MLAPI_REF`.
+- Model weights MUST be pinned by version and verified by checksum. A model that silently
+  changes produces detection differences indistinguishable from a code regression.
+- OS package versions SHOULD be pinned where a floating version could change the CUDA or OpenCV
+  toolchain. Pinning every apt package is not required and is not worth the maintenance.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+*Rationale:* Reproducibility is what lets anyone — the author comparing a migration against
+recorded events, or a user reporting a regression — distinguish "the image changed" from
+"my setup changed". An unpinned input makes every bug report unanswerable.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### III. The Server Is a Dumb Inference Engine
+
+The image runs a model and answers detection requests. It MUST NOT acquire any other
+responsibility.
+
+- No ZoneMinder awareness: no API client, no credentials, no event or monitor concepts.
+- No orchestration: frame selection, zone filtering, nuisance filtering, confidence thresholds,
+  past-detection matching and notification all belong to the client and MUST stay there.
+- No configuration file. `pyzm.serve` is configured by CLI flags and by the parameters on each
+  request; this repository MUST NOT reintroduce a config file, which is what made the `mlapi`
+  it replaces awkward to deploy.
+- The HTTP surface is upstream's (`/health`, `/models`, `/infer`, `/login`). This repository
+  MUST NOT add endpoints or alter their semantics. Needing to do so is a signal to contribute
+  upstream instead.
+
+*Rationale:* This is pyzmNg's own stated design — "the server is a dumb inference engine" — and
+keeping to it is what makes local and remote detection behave identically. It also keeps this
+image a commodity: a user who outgrows it can swap it out, and nothing they configured elsewhere
+has to change. An image that has learned about ZoneMinder is one its users cannot escape.
+
+### IV. Releases Are Immutable Promises
+
+A published tag MUST always refer to the same image, for as long as anything might pull it.
+
+- Releases are cut by pushing a git tag; the image tag equals the git tag. `latest` MUST NOT be
+  recommended as a deployment target.
+- A published tag MUST NEVER be overwritten, moved, or deleted. Strangers pin tags in their own
+  compose files and Puppet manifests, and have no way to know a tag moved under them. Deleting
+  one breaks a rollback path for people the author will never hear from.
+- Breaking changes — a removed model, a changed default, a new required flag — MUST be
+  signalled in the release notes and in the version number. Users MUST be able to tell from the
+  tag alone whether an upgrade is safe.
+- Images MUST be pushed to both Docker Hub and GHCR, carry OCI source/revision/version labels,
+  and include an SBOM — matching `docker-zm-mlapi`.
+- Builds from `main` MUST publish under a distinct, non-release tag that cannot be confused with
+  a release.
+
+*Rationale:* The author's own consumer is a live home security system whose rollback plan is
+"revert and re-apply", which only works if the old tag is still pullable. Other users' setups are
+invisible but no less real, and their recovery paths depend on the same promise.
+
+### V. Public, Personal, Best-Effort
+
+This is a one-person project that strangers are welcome and expected to use. Both halves are
+binding.
+
+**Because it is public and meant to be used:**
+
+- Nothing author-specific may be baked in. No hostnames, IP addresses, paths, credentials, or
+  hardware assumptions from the author's network. Anything site-specific MUST be a documented
+  runtime parameter with a sensible general default.
+- The README MUST be sufficient for someone who has never seen this repository to run the image
+  against their own ZoneMinder and confirm the GPU is working. A `docker-compose.yml` and a
+  worked example are the baseline, matching `docker-zm-mlapi`.
+- Defaults MUST be reasonable for a typical user, not tuned to the author's hardware.
+
+**Because it is personal and best-effort:**
+
+- The README MUST carry a repostatus badge and state plainly that support is best-effort, that
+  issues may not be addressed, and that PRs are welcome but not guaranteed a review — the same
+  honest framing `docker-zm-mlapi` uses. Setting expectations is a feature.
+- There is no obligation to support hardware, operating systems, or use cases the author cannot
+  test. Declining is always acceptable; pretending is not.
+- YAGNI still applies. Generality is added when a real user needs it, not in anticipation.
+
+*Rationale:* The failure mode for a project like this is not abandonment, which users can cope
+with — it is a project that looks supported and is not, or one that appears general and is
+quietly hardcoded to one person's basement. Saying plainly what this is costs nothing and
+prevents both.
+
+## Build & Runtime Constraints
+
+**OpenCV.** Built from source with `WITH_CUDA=ON`. Debian and Ubuntu both ship OpenCV without
+CUDA, which is why building from source is not optional.
+
+**CUDA architectures.** The image MUST be built for **several CUDA compute capabilities**, not
+only the author's. Users have different GPUs, and an image that only works on one is not usable
+by anyone else — which Principle V forbids. The `CUDA_ARCH_BIN` list MUST be an explicit build
+`ARG`, MUST cover a reasonable spread of currently-supported NVIDIA generations, and MUST include
+`6.1` (Pascal) for as long as it is supported. Note that Pascal has a finite life: NVIDIA's 580
+branch is the last to support it, and Debian 14 will ship 590+.
+
+This costs a materially longer build and a larger binary. That is accepted deliberately as the
+price of the image being usable by anyone other than its author.
+
+**Install order is load-bearing.** Ultralytics and several other packages pull `opencv-python`
+from PyPI, which shadows a source-built OpenCV. Whatever order resolves this MUST be commented
+in the Dockerfile explaining *why*, because the failure it prevents is silent and the fix looks
+arbitrary to anyone who has not been bitten by it. A future cleanup that "tidies" an
+unexplained workaround would restore a year-long bug. Principle I's assertion is the backstop,
+not the solution.
+
+**Base image.** Deliberately not fixed by this constitution. NVIDIA does not publish
+Debian-based CUDA images, so matching `docker-zm-mlapi`'s Debian convention requires adding
+NVIDIA's CUDA apt repository, while an `nvidia/cuda` Ubuntu tag gets a known-good toolchain at
+the cost of diverging from the sibling repository. Either is acceptable; the choice belongs to
+the first feature spec. Whatever is chosen MUST be pinned per Principle II.
+
+**Build cost.** Compiling OpenCV with CUDA for multiple architectures is the dominant cost of
+every build. Layers MUST be ordered so that this stage caches and is not invalidated by changes
+to application code, models, or metadata. A multi-stage build that ships only the runtime
+artifacts is strongly preferred — users should not download a compiler toolchain.
+
+**Platforms.** `linux/amd64` is the supported platform today. This is a statement of what is
+tested, not a principle; adding a platform the author can test is a normal change.
+
+**Models.** `yolo11m.onnx` is the primary model and `yolo11s.onnx` a lighter alternative; YOLOv4
+Darknet weights are retained as a fallback known to work with OpenCV DNN's CUDA backend. Which
+models ship MUST be documented, since it determines what a user can request without supplying
+their own.
+
+**Healthcheck.** The image MUST define a `HEALTHCHECK` against `/health`, so a wedged gateway is
+visible to Docker rather than only as detection silently stopping.
+
+## Development Workflow
+
+Deliberately minimal. Process is added when it earns its place.
+
+1. **Work on `main`.** Commits land directly on the default branch. Feature branches and pull
+   requests are not required for the maintainer's own work and MUST NOT be introduced on an
+   agent's own initiative. Contributor PRs are a separate matter and are welcome.
+2. **Green before done.** The image must build — which, per Principle I, means the CUDA
+   assertion passed — and CI must be green. A build that cannot publish is not finished work.
+3. **Verify on real hardware before releasing.** CI proves the build; only a machine with a GPU
+   proves the runtime. A release is not confirmed until it has been pulled and checked there.
+4. **Integration checks are useful but not authoritative.** `contracts/container-images.md` in
+   the author's `privatepuppet` repository describes what one consumer expects, and is a good
+   real-world test. It does not define this project's scope, and this project MUST NOT acquire
+   requirements that only make sense for that deployment.
+5. **Stop when unclear.** On genuine confusion or an unplanned significant decision, stop and
+   ask the operator. Do not guess.
+
+Commit messages open with a concise one-sentence summary followed by a detailed explanation of
+the change and its reasoning.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+**Authority.** This constitution supersedes other conventions in this repository where they
+conflict. It governs this repository only.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Amendment procedure.** Amendments are made by editing `.specify/memory/constitution.md` in a
+commit stating the reason, the version bump, and any follow-up work created. The repository
+maintainer approves all amendments.
+
+**Versioning policy.** Semantic versioning applies to this document:
+- MAJOR — a principle is removed or redefined in a way that invalidates existing practice.
+- MINOR — a principle or section is added, or existing guidance is materially expanded.
+- PATCH — clarification, wording, or typo fixes that do not change what is required.
+
+Note that this is the versioning of *this document*, and is unrelated to the image's release
+tags, which follow Principle IV.
+
+**Compliance review.** Compliance is checked before each commit and before each release. A
+change that violates a principle is either corrected or accompanied by an explicit written
+justification in the commit message. Repeated justification of the same violation is a signal to
+amend this constitution rather than keep granting exceptions.
+
+**Version**: 1.0.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-08-15
