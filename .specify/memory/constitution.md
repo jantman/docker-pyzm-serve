@@ -1,38 +1,42 @@
 <!--
 Sync Impact Report
 ==================
-Version change: (none) → 1.0.0
-Rationale: Initial ratification. The repository was created from `specify init` with an
-unpopulated scaffold; this is the first constitution. It supersedes an uncommitted draft that
-mischaracterised the project as a private, single-consumer image; no version bump applies
-because that draft was never ratified.
+Version change: 1.0.0 → 1.1.0
+Rationale: MINOR. A principle is added and existing guidance is materially expanded. Nothing is
+removed and no existing practice is invalidated — this repository has published no images yet, so
+the registry change below breaks no promise to anyone.
 
-Principles defined:
-  I.   Prove the GPU Path, Never Assume It (NON-NEGOTIABLE)
-  II.  Pin Everything
-  III. The Server Is a Dumb Inference Engine
-  IV.  Releases Are Immutable Promises
-  V.   Public, Personal, Best-Effort
+Both amendments originate in explicit operator direction given while specifying
+`specs/001-pyzm-serve-gpu-image`, and were flagged there as constitutional conflicts rather than
+silently resolved.
 
-Sections defined:
-  - Build & Runtime Constraints
-  - Development Workflow
-  - Governance
+Principles modified:
+  II.  Pin Everything — expanded with a closing note tying it to the new Principle VI. Pinning
+       governs *what* goes into the image; VI governs *when* it goes in. Neither alone is enough
+       for a tag to mean anything.
+  IV.  Releases Are Immutable Promises — the publication target narrows from "both Docker Hub and
+       GHCR" to GHCR only, with rationale. Label and SBOM obligations are unchanged.
 
-Corrections against the uncommitted draft, recorded because they change several principles:
-  - The project is public open source intended for use by strangers, not an appliance built for
-    one machine. Principle V was rewritten from "One Operator, One Purpose".
-  - Building for several CUDA compute capabilities is a requirement, not a YAGNI exception:
-    other users have other GPUs. Moved out of Principle V into Build & Runtime Constraints.
-  - `privatepuppet`'s contracts/container-images.md is one consumer's integration test, not this
-    project's acceptance surface. Governance and Development Workflow adjusted.
+Principles added:
+  VI.  Self-Contained by Construction — the image must contain everything it needs at publish
+       time and must acquire nothing at start-up. Closes a real gap: Principle II mandated pinning
+       inputs but never forbade fetching them at run time, under which the same tag could yield
+       different environments on different days.
+
+Sections modified:
+  - Build & Runtime Constraints — the base image and CUDA architecture paragraphs now record where
+    the deferred decisions were actually taken, so a reader does not mistake a settled choice for
+    an open question. The decisions themselves remain the feature spec's, not this document's.
+
+Sections added or removed: none.
 
 Deferred by decision, not oversight:
-  - Base image family (Debian + NVIDIA apt repo vs. an nvidia/cuda Ubuntu tag) is an
-    implementation choice for the first feature spec. The constitution constrains only that
-    whatever is chosen is pinned to an exact immutable tag.
+  - Nothing. No TODO placeholders remain.
 
-RATIFICATION_DATE 2026-08-15 (date of first adoption).
+History: the 1.0.0 ratification report, including the corrections it recorded against an
+uncommitted draft, is preserved in git history.
+
+RATIFICATION_DATE 2026-08-15 (unchanged; date of first adoption).
 -->
 
 # docker-pyzm-serve Constitution
@@ -93,6 +97,10 @@ Every input to the image MUST be pinned to an exact, immutable identifier.
 recorded events, or a user reporting a regression — distinguish "the image changed" from
 "my setup changed". An unpinned input makes every bug report unanswerable.
 
+This principle governs *what* goes into the image. Principle VI governs *when* it goes in — at
+build time, never at start-up. Pinning an input that is fetched when the container starts still
+leaves a tag whose meaning can change; both principles are required for a tag to mean anything.
+
 ### III. The Server Is a Dumb Inference Engine
 
 The image runs a model and answers detection requests. It MUST NOT acquire any other
@@ -125,14 +133,23 @@ A published tag MUST always refer to the same image, for as long as anything mig
 - Breaking changes — a removed model, a changed default, a new required flag — MUST be
   signalled in the release notes and in the version number. Users MUST be able to tell from the
   tag alone whether an upgrade is safe.
-- Images MUST be pushed to both Docker Hub and GHCR, carry OCI source/revision/version labels,
-  and include an SBOM — matching `docker-zm-mlapi`.
+- Images MUST be published to **GitHub Packages (GHCR) and nowhere else**. Docker Hub MUST NOT be
+  used. Published images MUST carry OCI source, revision, version and url labels, and MUST include
+  an SBOM — the metadata practice inherited from `docker-zm-mlapi`.
 - Builds from `main` MUST publish under a distinct, non-release tag that cannot be confused with
   a release.
 
 *Rationale:* The author's own consumer is a live home security system whose rollback plan is
 "revert and re-apply", which only works if the old tag is still pullable. Other users' setups are
 invisible but no less real, and their recovery paths depend on the same promise.
+
+Publishing to one registry rather than two follows from the same reasoning. Two registries mean two
+sets of credentials, two ways for a push to half-succeed, and two places a tag can disagree with
+itself — all in exchange for redundancy this project has never used. GHCR shares an account and a
+permission model with the source, so provenance is one hop rather than two. This narrowing costs
+nothing to existing users: this repository has never published to Docker Hub, so no promise made to
+anyone is being withdrawn. The predecessor image that does live there belongs to a different
+repository, and its obligation to stay pullable is unaffected by this document.
 
 ### V. Public, Personal, Best-Effort
 
@@ -163,6 +180,32 @@ with — it is a project that looks supported and is not, or one that appears ge
 quietly hardcoded to one person's basement. Saying plainly what this is costs nothing and
 prevents both.
 
+### VI. Self-Contained by Construction
+
+The published image MUST contain everything it needs to serve inference, and MUST acquire no part
+of its own runtime after publication.
+
+- Models, libraries and the gateway itself MUST be baked in at build time. No download on first
+  start, no model directory the image cannot run without, no setup step deferred to the operator.
+- Model artifacts MUST be checksum-verified **at build time**, so a changed artifact fails the
+  build. A user MUST NOT be the one to discover that a model changed.
+- The image MUST start, become healthy, and answer an inference request with no network access and
+  no volumes mounted. This is the test of this principle, and it is cheap enough to run every time.
+- Two containers started from the same tag MUST have identical environments — same models, same
+  versions, same checksums — regardless of when or where they start. Any behavioural difference
+  between them MUST be attributable to explicit operator configuration, never to what the image
+  fetched at start-up.
+- Operators MAY supply additional models of their own. Adding to the shipped set is a feature;
+  needing to supply something before the image works at all is a violation of this principle.
+
+*Rationale:* A tag that fetches something when it starts is not a version, it is a recipe — and its
+ingredients can change without the tag changing, which empties the promise made in Principle IV.
+Worse, run-time fetches fail precisely when they are least affordable: during a recovery, on a
+network that is down, behind a firewall added since deployment, or against an upstream URL that has
+since disappeared. An inference gateway for a security camera system is restarted in exactly those
+circumstances. Baking everything in costs image size, which is paid once at pull time by a machine,
+rather than availability, which is paid at the worst possible moment by a person.
+
 ## Build & Runtime Constraints
 
 **OpenCV.** Built from source with `WITH_CUDA=ON`. Debian and Ubuntu both ship OpenCV without
@@ -178,6 +221,12 @@ branch is the last to support it, and Debian 14 will ship 590+.
 This costs a materially longer build and a larger binary. That is accepted deliberately as the
 price of the image being usable by anyone other than its author.
 
+*The current list is set by `specs/001-pyzm-serve-gpu-image` at 6.1, 7.5, 8.6 and 8.9 — Pascal,
+Turing, consumer Ampere and Ada — plus forward-compatible intermediate code for the newest, so a
+card newer than any built for still runs. Adjusting that list is a normal change to that spec, not
+an amendment to this document; what this document fixes is the shape of the constraint, not the
+values.*
+
 **Install order is load-bearing.** Ultralytics and several other packages pull `opencv-python`
 from PyPI, which shadows a source-built OpenCV. Whatever order resolves this MUST be commented
 in the Dockerfile explaining *why*, because the failure it prevents is silent and the fix looks
@@ -191,6 +240,11 @@ NVIDIA's CUDA apt repository, while an `nvidia/cuda` Ubuntu tag gets a known-goo
 the cost of diverging from the sibling repository. Either is acceptable; the choice belongs to
 the first feature spec. Whatever is chosen MUST be pinned per Principle II.
 
+*That choice has since been taken: `specs/001-pyzm-serve-gpu-image` selects NVIDIA-published CUDA
+images of the 12.4 generation, pinned by digest, using the development variant to build and the
+runtime variant to ship. Recorded here so the deferral above is not misread as still open. It
+remains the spec's decision to revisit.*
+
 **Build cost.** Compiling OpenCV with CUDA for multiple architectures is the dominant cost of
 every build. Layers MUST be ordered so that this stage caches and is not invalidated by changes
 to application code, models, or metadata. A multi-stage build that ships only the runtime
@@ -202,7 +256,7 @@ tested, not a principle; adding a platform the author can test is a normal chang
 **Models.** `yolo11m.onnx` is the primary model and `yolo11s.onnx` a lighter alternative; YOLOv4
 Darknet weights are retained as a fallback known to work with OpenCV DNN's CUDA backend. Which
 models ship MUST be documented, since it determines what a user can request without supplying
-their own.
+their own. All of them ship inside the image, per Principle VI.
 
 **Healthcheck.** The image MUST define a `HEALTHCHECK` against `/health`, so a wedged gateway is
 visible to Docker rather than only as detection silently stopping.
@@ -250,4 +304,4 @@ change that violates a principle is either corrected or accompanied by an explic
 justification in the commit message. Repeated justification of the same violation is a signal to
 amend this constitution rather than keep granting exceptions.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-08-15
+**Version**: 1.1.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-08-15
