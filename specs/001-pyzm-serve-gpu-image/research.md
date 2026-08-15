@@ -335,10 +335,38 @@ repositories. The OpenCV CUDA compile across four architectures is the only step
 5. **An explicit `timeout-minutes`** below the hard cap, so a runaway build fails as a timeout with a
    clear cause rather than being killed at six hours.
 
-If the cold build still cannot fit, the escalation order is: trim `BUILD_LIST` further, then drop an
-architecture (documented, since it narrows FR-017), then move the OpenCV stage to a separately
-published, digest-pinned base image built manually. That last option keeps CI green at the cost of
-one manual step, and is a decision for the operator, not an agent.
+**Escalation order** if the cold build still cannot fit. Each step costs more than the one above it,
+and the last two are decisions for the operator, not an agent:
+
+1. **Trim `BUILD_LIST` further.** Cheapest, invisible to users.
+2. **Drop an architecture**, documented — it narrows FR-017. Prefer dropping the *newest* SASS target
+   and letting PTX cover it: JIT compiles forward, so SASS at 6.1/7.5/8.6 with PTX at 8.6 still runs
+   on Ada and Blackwell, at a one-off first-load delay. This reduces the per-architecture multiplier
+   with no change to how anyone deploys.
+3. **Publish one image per compute capability** (`v<semver>-sm61`, `-sm75`, …) from a job matrix, one
+   architecture per job. The 6-hour limit is per *job*, so this takes the critical path from
+   `A + 4K` to `A + K`, where `A` is the architecture-independent compile and `K` the per-architecture
+   CUDA kernel compile — only `.cu` sources multiply with `CUDA_ARCH_BIN`. Total CPU-hours rise,
+   which is free for a public repository. Ranked above option 4 because it keeps CI automated, and
+   below option 2 because it is the first step that changes what a *user* must know:
+   - **Nothing auto-selects the right image.** Docker manifest lists key on CPU architecture, not GPU
+     compute capability, so every user must map GPU → capability → tag by hand. Getting it wrong
+     fails at first inference on their own hardware with "no kernel image is available for execution
+     on the device" — loud, but late, and after they have followed the README. That is a direct cost
+     to SC-005 and Principle V.
+   - It multiplies the verification surface: the gate-bites check, the pull-back re-assertion and the
+     release job all run per image.
+   - Images get materially smaller, which helps SC-008.
+   - It rewrites the tag namespace in `contracts/container-interface.md` §1 and §9, the workflow
+     matrix, and the README's pinning and GPU-generation sections. Taking it late means redoing that
+     work — not breaking a promise: no real release exists until the spec is complete, so FR-028 has
+     nothing to bite on while this is still open.
+4. **Move the OpenCV stage to a separately published, digest-pinned base image built manually.** Keeps
+   CI green at the cost of one manual step outside the pipeline.
+
+Note that the benefit of option 3 depends entirely on the `K/A` ratio, which is unmeasured until the
+first cold build is timed. If `A` dominates, it quadruples the CI surface to shave little from the
+critical path. Measure before restructuring.
 
 ---
 

@@ -93,8 +93,11 @@ proof of GPU execution.
 - Standard GitHub-hosted runners only. Larger runners require a paid plan the maintainer does not
   have; self-hosted runners are out of scope.
 
-If a cold build cannot fit in the budget, the escalation order is documented in research R8 and the
-final step is an operator decision, not an agent's.
+If a cold build cannot fit in the budget, the escalation order is documented in research R8. Its last
+two steps — publishing one image per compute capability, and moving the OpenCV stage to a manually
+built base image — are operator decisions, not an agent's. Both change what this contract promises:
+the first rewrites the tag namespace in [container-interface.md](./container-interface.md) §1 and §9,
+so taking it means updating this contract and the README alongside the workflows.
 
 ---
 
