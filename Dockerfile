@@ -195,7 +195,7 @@ RUN cmake -S opencv -B build \
         -D CMAKE_C_COMPILER_LAUNCHER=ccache \
         -D CMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -D CMAKE_CUDA_COMPILER_LAUNCHER=ccache \
-    && cmake -B build -L | grep -iE "CUDA|cudnn" || true
+    && cmake -B build -L -N | grep -iE "CUDA|cudnn" || true
 
 # Compile and install into a staging prefix the runtime stage can COPY --from.
 #
@@ -248,10 +248,21 @@ ENV DEBIAN_FRONTEND=noninteractive \
     YOLO_AUTOINSTALL=false \
     YOLO_CONFIG_DIR=/tmp/ultralytics
 
+# The X11/GL shared libraries are here because Ultralytics imports cv2 unconditionally at
+# module load, and the PyPI `opencv-python` wheel it depends on links against them even
+# when nothing ever opens a window. python:3.12-slim carries none of them, so the export
+# fails with `ImportError: libxcb.so.1`.
+#
+# This is a headless build stage, so those libraries are pure dead weight -- and that is
+# fine, because NOTHING FROM THIS STAGE SHIPS. Only the exported .onnx and the downloaded
+# .weights are copied out. Adding them here is the boring fix; the clever alternative
+# (swapping in opencv-python-headless behind Ultralytics' back) would leave two packages
+# both claiming to provide cv2 in the stage whose entire job is to contain that mess.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates \
+        libgl1 libglib2.0-0 libxcb1 libsm6 libxext6 libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
 # CPU-ONLY PyTorch. The default index would pull several gigabytes of CUDA wheels for an
@@ -333,6 +344,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libpng16-16 \
         libtiff5 \
         libwebp7 \
+        libwebpmux3 \
+        libwebpdemux2 \
+        libopenjp2-7 \
         libgomp1 \
         ca-certificates \
         git \

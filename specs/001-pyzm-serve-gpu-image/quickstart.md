@@ -23,6 +23,18 @@ A sample image is needed for inference scenarios. Any photo containing a person 
 curl -sL -o sample.jpg https://ultralytics.com/images/bus.jpg
 ```
 
+### Why several commands below pass `--entrypoint`
+
+Any scenario that runs *something other than the gateway* inside the image must override the
+entrypoint — `docker run … IMAGE python3 -c …` does **not** work. Two reasons, both by design:
+
+1. Trailing arguments are appended to the server command line, not executed (contract §2,
+   RC-4), so `python3 -c …` would reach `python -m pyzm.serve` as flags.
+2. The entrypoint's GPU preflight runs first and exits `78` on a machine with no GPU.
+
+`--entrypoint python3` / `--entrypoint sh` bypasses both. This was found by executing these
+scenarios rather than reading them.
+
 ---
 
 ## Scenario 1 — The build refuses to ship a CUDA-less OpenCV
@@ -71,8 +83,8 @@ indistinguishable from a code regression, and this gate is the only thing betwee
 Principle VI.*
 
 ```bash
-docker run --rm --network none pyzm-serve:local \
-  python3 -c "import os; p='/var/lib/zmeventnotification/models'; \
+docker run --rm --network none --entrypoint python3 pyzm-serve:local \
+  -c "import os; p='/var/lib/zmeventnotification/models'; \
 print(sorted(f for _,_,fs in os.walk(p) for f in fs))"
 ```
 
@@ -82,7 +94,7 @@ no network and no volumes.
 Confirm no build toolchain shipped (FR-018, SC-008):
 
 ```bash
-docker run --rm pyzm-serve:local sh -c 'which gcc g++ cmake nvcc || echo "no toolchain: correct"'
+docker run --rm --entrypoint sh pyzm-serve:local -c 'which gcc g++ cmake nvcc || echo "no toolchain: correct"'
 docker image inspect pyzm-serve:local --format '{{.Size}}' | numfmt --to=iec
 ```
 
@@ -92,7 +104,7 @@ Confirm reproducibility of the environment across containers (FR-034, SC-014):
 
 ```bash
 for i in 1 2; do
-  docker run --rm pyzm-serve:local sh -c \
+  docker run --rm --entrypoint sh pyzm-serve:local -c \
     'find /var/lib/zmeventnotification/models -type f | sort | xargs sha256sum'
 done | sort | uniq -c
 ```
@@ -245,8 +257,8 @@ Three checks. None substitutes for the others.
 **5a — compiled with CUDA** (works without a GPU; proves what was built):
 
 ```bash
-docker run --rm pyzm-serve:local python3 -c \
-  "import cv2; print([l for l in cv2.getBuildInformation().splitlines() if 'CUDA' in l])"
+docker run --rm --entrypoint python3 pyzm-serve:local \
+  -c "import cv2; print([l for l in cv2.getBuildInformation().splitlines() if 'CUDA' in l])"
 ```
 
 **Expected**: a line reporting NVIDIA CUDA as `YES`.
@@ -254,8 +266,8 @@ docker run --rm pyzm-serve:local python3 -c \
 **5b — a CUDA device is visible** (needs a GPU; proves what is available):
 
 ```bash
-docker run --rm --gpus all pyzm-serve:local python3 -c \
-  "import cv2; print(cv2.__version__); print(cv2.cuda.getCudaEnabledDeviceCount())"
+docker run --rm --gpus all --entrypoint python3 pyzm-serve:local \
+  -c "import cv2; print(cv2.__version__); print(cv2.cuda.getCudaEnabledDeviceCount())"
 ```
 
 **Expected**: a non-zero device count. Zero means the GPU is not reaching the container.

@@ -126,17 +126,23 @@ substitutes for the others.
 ### 1. Compiled with CUDA (no GPU required — proves what was *built*)
 
 ```bash
-docker run --rm ghcr.io/jantman/docker-pyzm-serve:v0.1.0 python3 -c \
-  "import cv2; print([l for l in cv2.getBuildInformation().splitlines() if 'CUDA' in l])"
+docker run --rm --entrypoint python3 ghcr.io/jantman/docker-pyzm-serve:v0.1.0 \
+  -c "import cv2; print([l for l in cv2.getBuildInformation().splitlines() if 'CUDA' in l])"
 ```
 
-Expect a line reporting **NVIDIA CUDA as `YES`**.
+Expect lines reporting **NVIDIA CUDA as `YES`** and **cuDNN as `YES`**. Both matter: CUDA
+alone gives you the `cv2.cuda` namespace, but the DNN module — which is what actually runs
+inference here — only gets its CUDA backend when cuDNN is present.
+
+> `--entrypoint python3` is needed on any command like this. Without it, `python3 -c …` is
+> appended to the *server's* command line (that is the documented behaviour — see
+> [Configuration](#configuration)), and the container tries to start the gateway instead.
 
 ### 2. A CUDA device is visible (proves what is *available*)
 
 ```bash
-docker run --rm --gpus all ghcr.io/jantman/docker-pyzm-serve:v0.1.0 python3 -c \
-  "import cv2; print(cv2.__version__); print(cv2.cuda.getCudaEnabledDeviceCount())"
+docker run --rm --gpus all --entrypoint python3 ghcr.io/jantman/docker-pyzm-serve:v0.1.0 \
+  -c "import cv2; print(cv2.__version__); print(cv2.cuda.getCudaEnabledDeviceCount())"
 ```
 
 Expect a **non-zero** device count. Zero means the GPU is not reaching the container — check
@@ -333,19 +339,22 @@ support it, and its eventual removal here will be a breaking change, signalled i
 
 ### Image size
 
-<!-- MEASURED: see the Build notes section. Updated whenever the base image or model set changes. -->
-The published image is approximately **6.0 GB uncompressed** on disk after `docker pull`
-(roughly 3 GB of download). That is large, and it is the direct price of two deliberate
-choices: a full CUDA + cuDNN runtime, and baking in every model so the image needs no network
-after it is pulled.
+<!-- MEASURED 2026-08-15 against the local build: 4363005636 bytes on disk. Re-measure when
+     the base image, the model set or the OpenCV BUILD_LIST changes. -->
+**4.1 GiB on disk** once pulled (about 4.36 GB / 2–3 GB of download, since layers transfer
+compressed). That is large, and it is the direct price of two deliberate choices: a full
+CUDA + cuDNN runtime, and baking in every model so the image needs no network after it is
+pulled — you pay it once, at pull time, on a machine, rather than during a recovery, at the
+worst possible moment, as a person.
 
-Breakdown, roughly: ~2 GB CUDA/cuDNN runtime libraries, ~3 GB CUDA base image layers, ~310 MB
-of models, ~200 MB of OpenCV, and a small amount of Python. **No compiler toolchain is
-included** — no `gcc`, no `cmake`, no `nvcc`. You can check:
+Roughly: ~3.4 GB of CUDA 12.4 + cuDNN 9.1 runtime libraries from NVIDIA's base image,
+~310 MB of models (`yolov4.weights` alone is 250 MB), ~180 MB of OpenCV and its Python
+bindings, and the rest Python. **No compiler toolchain is included** — no `gcc`, no `cmake`,
+no `nvcc`. You can check:
 
 ```bash
-docker run --rm ghcr.io/jantman/docker-pyzm-serve:v0.1.0 \
-  sh -c 'which gcc g++ cmake nvcc || echo "no toolchain: correct"'
+docker run --rm --entrypoint sh ghcr.io/jantman/docker-pyzm-serve:v0.1.0 \
+  -c 'which gcc g++ cmake nvcc || echo "no toolchain: correct"'
 ```
 
 ---

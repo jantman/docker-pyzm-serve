@@ -71,7 +71,14 @@ def main():
     # A CUDA-less build either reports "NVIDIA CUDA: NO" or omits the line entirely,
     # depending on how the configure step failed. Both are failures; treating a missing
     # line as "probably fine" is precisely the assumption this file exists to refuse.
-    cuda_lines = [ln.rstrip() for ln in build_info.splitlines() if "CUDA" in ln.upper()]
+    # "cuDNN" does not contain the substring "CUDA", so it must be matched separately or it
+    # is missing from every failure report -- including the cuDNN failure below, whose whole
+    # point is to show the operator that line.
+    cuda_lines = [
+        ln.rstrip()
+        for ln in build_info.splitlines()
+        if "CUDA" in ln.upper() or "CUDNN" in ln.upper()
+    ]
     match = re.search(r"^\s*NVIDIA CUDA:\s*(\S+)(.*)$", build_info, re.MULTILINE)
 
     if match is None:
@@ -92,7 +99,35 @@ def main():
             + "\n  ".join(cuda_lines),
         )
 
-    # --- 3. The cv2.cuda namespace must exist -------------------------------------
+    # --- 3. cuDNN must be present -------------------------------------------------
+    #
+    # A DISTINCT claim from "NVIDIA CUDA: YES", and the one that actually matters for this
+    # image. WITH_CUDA=ON alone gives you the cv2.cuda namespace and the CUDA-accelerated
+    # image-processing modules -- but the DNN module only gets its CUDA backend from
+    # OPENCV_DNN_CUDA=ON, which requires cuDNN and refuses to configure without it.
+    #
+    # Inference here runs through cv2.dnn. So a build with WITH_CUDA=ON and
+    # OPENCV_DNN_CUDA=OFF would satisfy every other check on this page while running every
+    # frame through the CPU DNN backend -- the exact silent-fallback shape this file
+    # exists to refuse. cuDNN: YES is the GPU-free evidence that the DNN CUDA backend was
+    # actually built, which is why it is asserted rather than merely printed.
+    cudnn_match = re.search(r"^\s*cuDNN:\s*(\S+)(.*)$", build_info, re.MULTILINE)
+    if cudnn_match is None or cudnn_match.group(1).upper() != "YES":
+        found = "no 'cuDNN:' line at all" if cudnn_match is None else (
+            "'cuDNN: {}'".format(cudnn_match.group(1))
+        )
+        fail(
+            "cv2.getBuildInformation() reports {} -- expected 'cuDNN: YES'.".format(found),
+            "CUDA is compiled in, but WITHOUT cuDNN the DNN module has no CUDA backend\n"
+            "(OPENCV_DNN_CUDA requires it). Inference in this image runs through cv2.dnn,\n"
+            "so such a build would accept a request for the CUDA backend and then run\n"
+            "every frame on the CPU, silently -- which is precisely the failure this\n"
+            "assertion exists to prevent.\n\n"
+            "CUDA-mentioning lines found in the build information:\n  "
+            + "\n  ".join(cuda_lines),
+        )
+
+    # --- 4. The cv2.cuda namespace must exist -------------------------------------
     #
     # This is a distinct claim from the one above: WITH_CUDA=ON without opencv_contrib
     # produces a cv2 with no cuda namespace, because cudaarithm -- which is what puts
@@ -115,7 +150,7 @@ def main():
             "container cannot tell whether a GPU is visible and FR-004 is unsatisfiable.",
         )
 
-    # --- 4. Report what we proved -------------------------------------------------
+    # --- 5. Report what we proved -------------------------------------------------
     print(BANNER)
     print("CUDA BUILD ASSERTION PASSED")
     print(BANNER)
@@ -124,6 +159,18 @@ def main():
     print("CUDA-related build configuration:")
     for line in cuda_lines:
         print("  {}".format(line))
+    print("")
+
+    # Reported, not asserted: on some builds this reflects what is usable RIGHT NOW rather
+    # than what was compiled, so it would fail on a GPU-less runner. The cuDNN check above
+    # is the assertable, hardware-independent form of the same question.
+    try:
+        backends = cv2.dnn.getAvailableBackends()
+        print("DNN backends available to this interpreter:")
+        for entry in backends:
+            print("  {}".format(entry))
+    except Exception as exc:  # noqa: BLE001 - informational only
+        print("DNN backend list unavailable ({}: {})".format(type(exc).__name__, exc))
     print("")
 
     # Deliberately reported, never asserted on: this file must pass on a GPU-less runner.
