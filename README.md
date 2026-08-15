@@ -460,19 +460,33 @@ Everything is pinned — base images by digest, git checkouts by full commit SHA
 by SHA-256 checksum verified during the build. Overridable pins are `ARG`s at the top of the
 [`Dockerfile`](./Dockerfile).
 
-The dominant cost is compiling OpenCV with CUDA for four GPU architectures. Measured on a
-24-core workstation:
+The dominant cost is compiling OpenCV with CUDA. Measured 2026-08-15 on a 24-core
+workstation, with the ccache and package caches cleared before each cold run:
 
-<!-- MEASURED: re-measure when CUDA_ARCH_BIN, BUILD_LIST or the OpenCV version changes. -->
+<!-- MEASURED: re-measure when CUDA_ARCH_BIN, BUILD_LIST or the OpenCV version changes.
+     Both cold runs verified genuinely cold: ccache reported 0 hits / 648 misses. -->
 
-| Build | `CUDA_ARCH_BIN` | Wall clock |
-|---|---|---|
-| Cold, all four architectures | `6.1;7.5;8.6;8.9` | *(see the table filled in below)* |
-| Cold, single architecture | `6.1` | *(see the table filled in below)* |
-| Warm (cached) | — | *(see the table filled in below)* |
+| Build | `CUDA_ARCH_BIN` | Total | OpenCV compile stage |
+|---|---|---|---|
+| Cold, all four architectures | `6.1;7.5;8.6;8.9` | **5m03s** | 174.9s |
+| Cold, single architecture | `6.1` | **4m52s** | 114.2s |
+| Warm, no changes | — | **4s** | cached |
 
-Narrowing `CUDA_ARCH_BIN` is the main lever if you only have one kind of GPU and want a
-faster, smaller build:
+Two useful conclusions fall out of those two compile numbers. Solving
+`A + 4K = 174.9` and `A + K = 114.2` gives an architecture-independent compile of
+**A ≈ 94s** and a per-architecture cost of only **K ≈ 20s**.
+
+- **Build time is a non-issue.** A cold build is ~5 minutes here, against a GitHub-hosted
+  runner's 6-hour job cap. Even allowing for a standard runner being several times slower,
+  there is a very large margin. The trimmed `BUILD_LIST` is what bought that — it compiles
+  ten OpenCV modules rather than sixty.
+- **Publishing one image per GPU architecture would not be worth it.** It was considered as
+  a way to shorten the critical path. Since `A` dominates `K`, it would cut the compile from
+  175s to 114s — while quadrupling the CI and verification surface and forcing every user to
+  map their GPU to a compute capability and pick the matching tag by hand. Not taken.
+
+Narrowing `CUDA_ARCH_BIN` is still the main lever if you only have one kind of GPU and want
+a smaller image:
 
 ```bash
 docker build --build-arg CUDA_ARCH_BIN=8.6 --build-arg CUDA_ARCH_PTX=8.6 -t pyzm-serve:local .
