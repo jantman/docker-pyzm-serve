@@ -77,10 +77,16 @@ jobs:
           set -uo pipefail
           echo "Checking whether ${IMAGE}:${TAG} already exists..."
 
-          output="$(docker buildx imagetools inspect "${IMAGE}:${TAG}" 2>&1)"
-          rc=$?
-
-          if [ "${rc}" -eq 0 ]; then
+          # NOTE ON THE `if` FORM -- do not "simplify" this back to assigning the
+          # command's output and then testing $?.
+          #
+          # GitHub runs every `run:` step as `bash -e {0}`. `set -uo pipefail` above does
+          # NOT cancel that -e, so a bare `output="$(... )"` whose command exits non-zero
+          # kills the step instantly, before any $? test can run -- which is exactly what
+          # happened the first time this job executed: it printed the line above and then
+          # died with no diagnostic at all. A command inside an `if` condition is exempt
+          # from -e, so this form is the fix.
+          if output="$(docker buildx imagetools inspect "${IMAGE}:${TAG}" 2>&1)"; then
             echo "::error::${IMAGE}:${TAG} is already published; a released tag must never be moved (FR-024)."
             echo ""
             echo "A released tag is an immutable promise. Someone may have pinned it in a"
@@ -98,7 +104,7 @@ jobs:
           echo "--- inspect output (non-zero exit, expected for an unpublished tag) ---"
           echo "${output}"
 
-          if echo "${output}" | grep -qiE "not found|manifest unknown|name unknown|denied|no such"; then
+          if echo "${output}" | grep -qiE "not found|manifest unknown|name unknown|denied|no such|unauthorized|does not exist"; then
             echo "Tag is free. Proceeding."
             exit 0
           fi
