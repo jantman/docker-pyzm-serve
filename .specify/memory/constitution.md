@@ -1,40 +1,50 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 1.0.0 → 1.1.0
-Rationale: MINOR. A principle is added and existing guidance is materially expanded. Nothing is
-removed and no existing practice is invalidated — this repository has published no images yet, so
-the registry change below breaks no promise to anyone.
+Version change: 1.1.0 → 1.2.0
+Rationale: MINOR. Existing guidance is materially expanded: one bullet of Principle III is
+rescoped and gains a binding behavioural test it did not have. Not PATCH, because what the
+principle requires genuinely changes rather than merely reading more clearly. Not MAJOR, because
+nothing that was compliant becomes non-compliant — the amendment removes an obligation that no
+implementation could ever have met.
 
-Both amendments originate in explicit operator direction given while specifying
-`specs/001-pyzm-serve-gpu-image`, and were flagged there as constitutional conflicts rather than
-silently resolved.
+Origin: found during implementation of `specs/001-pyzm-serve-gpu-image`, not during specification.
+Checking Principle III against the built image showed that `pyzm.serve.app` transitively imports
+`pyzm.zm.api`, `pyzm.zm.auth`, `pyzm.zm.media`, `pyzm.zm.shm`, `pyzm.models.zm` and `pyzm.client`.
+Read literally, "no ZoneMinder awareness ... no API client, no credentials, no event or monitor
+concepts" is therefore violated by any image that installs `pyzm` at all — which is to say, by the
+only image this repository exists to build. A rule that cannot be satisfied is not a constraint;
+it is a dead letter, and it quietly teaches its readers that compliance checks can be waved
+through.
 
 Principles modified:
-  II.  Pin Everything — expanded with a closing note tying it to the new Principle VI. Pinning
-       governs *what* goes into the image; VI governs *when* it goes in. Neither alone is enough
-       for a tag to mean anything.
-  IV.  Releases Are Immutable Promises — the publication target narrows from "both Docker Hub and
-       GHCR" to GHCR only, with rationale. Label and SBOM obligations are unchanged.
+  III. The Server Is a Dumb Inference Engine — the first bullet is rescoped from a claim about
+       what CODE EXISTS inside the image to a claim about what RESPONSIBILITY this repository
+       takes on, and gains a test that can actually be executed: the container MUST NOT require
+       or be configurable with a ZoneMinder connection, and MUST serve inference with no network
+       at all. Upstream's packaging is explicitly carved out, because excising it would mean
+       forking `pyzm` — which this same principle's final bullet exists to discourage. The
+       rationale gains a closing sentence naming the distinction. The principle's name, intent
+       and other three bullets are unchanged.
 
-Principles added:
-  VI.  Self-Contained by Construction — the image must contain everything it needs at publish
-       time and must acquire nothing at start-up. Closes a real gap: Principle II mandated pinning
-       inputs but never forbade fetching them at run time, under which the same tag could yield
-       different environments on different days.
+Principles added or removed: none.
 
-Sections modified:
-  - Build & Runtime Constraints — the base image and CUDA architecture paragraphs now record where
-    the deferred decisions were actually taken, so a reader does not mistake a settled choice for
-    an open question. The decisions themselves remain the feature spec's, not this document's.
+Sections added, modified or removed: none.
 
-Sections added or removed: none.
+Consistency note (no change required): the behavioural half of the amended bullet is enforced by
+Principle VI, whose no-network start-up check is the same test. The overlap is deliberate — III
+says what the constraint means, VI is where it gets executed.
+
+Downstream artifacts read this document at runtime and are not edited here. FR-006 in
+`specs/001-pyzm-serve-gpu-image/spec.md` restates the older wording and should be reconciled the
+next time that spec is touched. It is not a live conflict: the delivered image satisfies both the
+old intent and the new test.
 
 Deferred by decision, not oversight:
   - Nothing. No TODO placeholders remain.
 
-History: the 1.0.0 ratification report, including the corrections it recorded against an
-uncommitted draft, is preserved in git history.
+History: the 1.0.0 ratification report and the 1.1.0 amendment report are preserved in git
+history.
 
 RATIFICATION_DATE 2026-08-15 (unchanged; date of first adoption).
 -->
@@ -106,7 +116,18 @@ leaves a tag whose meaning can change; both principles are required for a tag to
 The image runs a model and answers detection requests. It MUST NOT acquire any other
 responsibility.
 
-- No ZoneMinder awareness: no API client, no credentials, no event or monitor concepts.
+- **No ZoneMinder awareness of this repository's own making.** This repository MUST NOT add a
+  ZoneMinder API client, ZoneMinder credentials, or event, monitor or zone concepts, and MUST
+  NOT expose any setting that points the container at a ZoneMinder instance. The binding test
+  is behavioural, because that is the only form of this rule that can actually be checked: the
+  container MUST NOT require, or be configurable with, a connection to ZoneMinder, and MUST
+  serve inference with no network access at all.
+
+  Upstream's `pyzm` package ships ZoneMinder modules and imports them transitively whenever
+  `pyzm.serve` loads. That is upstream's packaging, not a responsibility this image has taken
+  on, and removing it would mean forking `pyzm` — which the last bullet of this principle
+  exists to discourage. Their presence in the image is therefore permitted explicitly. Calling
+  them, configuring them, or depending on them is not.
 - No orchestration: frame selection, zone filtering, nuisance filtering, confidence thresholds,
   past-detection matching and notification all belong to the client and MUST stay there.
 - No configuration file. `pyzm.serve` is configured by CLI flags and by the parameters on each
@@ -120,6 +141,12 @@ responsibility.
 keeping to it is what makes local and remote detection behave identically. It also keeps this
 image a commodity: a user who outgrows it can swap it out, and nothing they configured elsewhere
 has to change. An image that has learned about ZoneMinder is one its users cannot escape.
+
+Note that every bullet above constrains what this image *does*, not which bytes exist inside it.
+That distinction is the whole substance of the first bullet: a rule about the contents of an
+upstream dependency would be unenforceable without forking it, and would still not prevent the
+harm this principle is about, which is the image acquiring responsibilities its users must then
+work around.
 
 ### IV. Releases Are Immutable Promises
 
@@ -304,4 +331,4 @@ change that violates a principle is either corrected or accompanied by an explic
 justification in the commit message. Repeated justification of the same violation is a signal to
 amend this constitution rather than keep granting exceptions.
 
-**Version**: 1.1.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-08-15
+**Version**: 1.2.0 | **Ratified**: 2026-08-15 | **Last Amended**: 2026-08-15
