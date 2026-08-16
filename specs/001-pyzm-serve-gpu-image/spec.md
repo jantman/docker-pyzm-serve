@@ -222,10 +222,20 @@ asking a question.
 - **FR-005**: The image MUST define a container healthcheck against the gateway's health endpoint,
   so that a wedged gateway is visible to the container runtime rather than manifesting only as
   detection quietly stopping.
-- **FR-006**: The image MUST NOT contain any ZoneMinder-specific knowledge: no ZoneMinder API
-  client, no ZoneMinder credentials, and no awareness of events, monitors, or zones. Frame
-  selection, zone filtering, nuisance filtering, confidence policy and notification remain entirely
-  the client's responsibility.
+- **FR-006**: This repository MUST NOT add ZoneMinder-specific knowledge of its own: no ZoneMinder
+  API client, no ZoneMinder credentials, no awareness of events, monitors or zones, and no setting
+  that points the container at a ZoneMinder instance. The binding test is behavioural: the
+  container MUST NOT require, or be configurable with, a connection to ZoneMinder, and MUST serve
+  inference with no network access. Frame selection, zone filtering, nuisance filtering, confidence
+  policy and notification remain entirely the client's responsibility.
+
+  *Amended to match Constitution v1.2.0.* This originally read "The image MUST NOT **contain** any
+  ZoneMinder-specific knowledge", which implementation showed to be unsatisfiable: upstream's
+  `pyzm` package ships ZoneMinder modules and imports them transitively whenever `pyzm.serve`
+  loads, so any image installing `pyzm` — that is, the only image this spec describes — violated
+  it. Excising them would mean forking upstream, which Principle III's own final clause
+  discourages. The requirement is therefore about the responsibility this repository takes on,
+  which is checkable, rather than the bytes present in a dependency, which is not.
 - **FR-007**: Request authentication MUST be available as an opt-in run-time setting and MUST be off
   by default, with the security implication of the default stated in the documentation.
 

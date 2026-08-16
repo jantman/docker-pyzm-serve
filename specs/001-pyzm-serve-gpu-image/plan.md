@@ -69,14 +69,17 @@ Concurrency is one home security system's event rate — single-digit requests p
 
 *GATE: evaluated before Phase 0 research, re-evaluated after Phase 1 design.*
 
-Constitution v1.1.0. Both evaluations below are recorded; nothing changed between them except where
+Constitution v1.2.0. Both evaluations below are recorded; nothing changed between them except where
 noted.
+
+*Originally evaluated against v1.1.0. Implementation of Principle III produced amendment v1.2.0 —
+see the Principle III row for what changed and why. No other principle's evaluation is affected.*
 
 | Principle | Gate | Initial | Post-design |
 |---|---|---|---|
 | **I. Prove the GPU Path** | Build fails without compiled-CUDA evidence; CI re-verifies the published artifact; README documents the runtime check; no check may pass with the GPU idle | PASS | **PASS — strengthened.** R6 showed the contract's log-grep check passes in the failure case, so the ladder in R6 replaced it. The entrypoint preflight (R7) was added because upstream cannot fail loudly on its own. |
 | **II. Pin Everything** | Base image by digest; upstream checkouts by full SHA via ARG; models by version + checksum; toolchain-relevant packages pinned | PASS | **PASS.** Both base digests captured (R1). `yolov4.cfg`/`coco.names` moved from a floating `master` ref to vendored files — a pin the naive approach would have missed. Honest limit recorded: the exported `.onnx` is not bit-reproducible, so inputs are gated and the output checksum is observed. |
-| **III. Dumb Inference Engine** | No ZoneMinder awareness; no orchestration; no config file; upstream's HTTP surface unaltered | PASS | **PASS.** Env vars map to upstream CLI flags and nothing more. The entrypoint preflight is not an endpoint and does not alter request semantics — it decides whether the process starts. Upstream's `--config` YAML exists but we neither ship nor document one. |
+| **III. Dumb Inference Engine** | No ZoneMinder awareness of our own; no orchestration; no config file; upstream's HTTP surface unaltered | PASS | **PASS — principle amended.** Env vars map to upstream CLI flags and nothing more. The entrypoint preflight is not an endpoint and does not alter request semantics — it decides whether the process starts. Upstream's `--config` YAML exists but we neither ship nor document one. `/openapi.json` on a running container exposes exactly upstream's four routes. Implementation found the original "no ZoneMinder awareness" bullet unsatisfiable — `pyzm.serve.app` transitively imports `pyzm.zm.*` and `pyzm.client` — so it was rescoped to what this repository *adds*, with a behavioural test, in **Constitution v1.2.0**. The delivered image satisfies it: no ZM host, credential or URL variable is declared, and it serves inference under `--network none`. |
 | **IV. Immutable Promises** | Tag equals git tag; never overwrite; breaking changes signalled; GHCR only; OCI labels + SBOM; `main` builds under a distinct tag | PASS | **PASS.** One deliberate wrinkle: the BuildKit `:buildcache` tag is mutable. It is not a release and not a runnable image; named and documented so it cannot be mistaken for one (R8/R9). |
 | **V. Public, Personal, Best-Effort** | Nothing author-specific; README sufficient for a stranger; sensible general defaults; status badge and honest support framing | PASS | **PASS.** Four GPU generations, not one. `PYZM_SERVE_ALLOW_CPU` exists so a GPU-less user is not refused outright. Every site-specific value is an env var with a general default. |
 | **VI. Self-Contained by Construction** | Everything baked in; checksums at build; starts with no network and no volumes; same tag ⇒ same environment | PASS | **PASS.** Models exported and baked at build. The no-network/no-volume start is an executable check in quickstart.md, not an aspiration. |
