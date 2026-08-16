@@ -3,11 +3,15 @@
 # Container entrypoint: validate the configuration, translate environment variables into
 # `python -m pyzm.serve` flags, then hand the process over.
 #
-# This is deliberately the only code of our own that runs at start-up. It is NOT
-# orchestration and it adds NO HTTP behaviour -- Constitution Principle III forbids both.
-# It does exactly two things upstream cannot do for itself: refuse to start in a
-# configuration the operator did not actually ask for (see the preflights below), and turn
-# a documented environment table into a command line.
+# This and scripts/warmup.py are the only code of our own that runs at start-up. Neither is
+# orchestration and neither adds HTTP behaviour -- Constitution Principle III forbids both;
+# the warm-up is a client of upstream's own `/infer`, not a new endpoint.
+#
+# Between them they do three things upstream cannot do for itself: refuse to start in a
+# configuration the operator did not actually ask for (see the preflights below), turn a
+# documented environment table into a command line, and prove -- by running one real frame
+# through the server -- that inference happens on the processor that was asked for
+# (warmup.py, and see issue #1 for the failure that made that necessary).
 #
 # The variable table is a convenience, never a cage: anything passed after the image name
 # on `docker run` is appended verbatim to the server command line (RC-4).
@@ -169,6 +173,21 @@ build_args() {
     # Upstream store_true flags: present or absent, never valued.
     [[ -n "${PYZM_SERVE_DEBUG:-}" ]] && out+=(--debug)
 
+    # GPU-degradation policy (upstream #67). Both are unset by default, which leaves
+    # upstream's own behaviour in place: a CUDA error degrades that model to CPU and the
+    # GPU is retried 60s later, doubling to a 15-minute cap.
+    #
+    # PYZM_SERVE_ALLOW_CPU deliberately does NOT imply --no-cpu-fallback. It governs
+    # start-up only, and the two questions are genuinely separate: "refuse to start
+    # without a GPU" is not the same as "refuse to answer if the GPU falters mid-run".
+    # Coupling them would mean an operator who wants graceful degradation has to give up
+    # the exit-78 guard to get it. Degradation is now visible (`/models` reports the live
+    # processor, and the healthcheck fails on it) and self-healing, which is what makes
+    # tolerating it defensible; before upstream #67 it was neither.
+    [[ -n "${PYZM_SERVE_NO_CPU_FALLBACK:-}" ]] && out+=(--no-cpu-fallback)
+    [[ -n "${PYZM_SERVE_GPU_RETRY_SECONDS:-}" ]] \
+        && out+=(--gpu-retry-seconds "${PYZM_SERVE_GPU_RETRY_SECONDS}")
+
     if [[ -n "${PYZM_SERVE_AUTH:-}" ]]; then
         out+=(--auth)
         [[ -n "${PYZM_SERVE_AUTH_USER:-}" ]]     && out+=(--auth-user "${PYZM_SERVE_AUTH_USER}")
@@ -194,6 +213,33 @@ main() {
 
     # Never log the resolved command line: --auth-password and --token-secret are on it.
     log "Starting pyzm.serve (processor=${PYZM_SERVE_PROCESSOR:-gpu}, models=${PYZM_SERVE_MODELS:-yolo11m}, port=${PYZM_SERVE_PORT:-5000})"
+
+    # Warm-up, backgrounded BEFORE the exec below, because after it this shell no longer
+    # exists to start anything. It waits for the server to finish loading, posts one frame
+    # to upstream's `/infer`, and stops the container if that frame does not come back from
+    # the processor that was requested. See scripts/warmup.py for why an in-process check
+    # is the only kind that proves anything here.
+    #
+    # It outlives this shell as a child of PID 1 and is not reaped when it finishes, so a
+    # single <defunct> entry is expected for the life of the container. That is the price
+    # of keeping `exec` -- and keeping `exec` is what makes `docker stop` reach the server
+    # directly instead of being absorbed by a supervisor shell.
+    # --kill-on-failure is withheld when PYZM_SERVE_ALLOW_CPU is set, and that is not a
+    # detail. That variable is the escape hatch for someone who asked for the GPU and knows
+    # they may not get it -- the preflight above already let them past on exactly that
+    # basis. Killing the container when the warm-up then lands on the CPU would put them in
+    # a restart loop and make the escape hatch a trap. They still get the warm-up's finding
+    # in the log, and the healthcheck still reports the container unhealthy.
+    local warmup_args=()
+    [[ -z "${PYZM_SERVE_ALLOW_CPU:-}" ]] && warmup_args+=(--kill-on-failure)
+
+    if [[ "${PYZM_SERVE_WARMUP:-1}" != "0" ]]; then
+        python3 /opt/warmup.py "${warmup_args[@]}" &
+    else
+        warn "PYZM_SERVE_WARMUP=0: skipping the start-up inference. Until a real request
+arrives, nothing will have proven that inference runs on ${PYZM_SERVE_PROCESSOR:-gpu}, and
+the healthcheck can only report the processor each model was configured with."
+    fi
 
     # exec, so the server becomes PID 1 and SIGTERM from `docker stop` reaches it directly
     # rather than being absorbed by this shell. Shutdown is clean and prompt.

@@ -202,7 +202,11 @@ Everything is an environment variable. There is no configuration file, by design
 | `PYZM_SERVE_AUTH_USER` | `admin` | Auth username. |
 | `PYZM_SERVE_AUTH_PASSWORD` | unset | Auth password. **Required when auth is on.** |
 | `PYZM_SERVE_TOKEN_SECRET` | unset | JWT signing secret. **Required when auth is on.** |
-| `PYZM_SERVE_ALLOW_CPU` | unset | Downgrades the "no GPU visible" refusal to a warning. |
+| `PYZM_SERVE_ALLOW_CPU` | unset | Downgrades the "no GPU visible" refusal to a warning. Start-up only — see below. |
+| `PYZM_SERVE_NO_CPU_FALLBACK` | unset | Any non-empty value makes a GPU failure fail the request instead of degrading to CPU. |
+| `PYZM_SERVE_GPU_RETRY_SECONDS` | unset (upstream: `60`) | Seconds on CPU after a GPU failure before the GPU is retried, doubling to a 15-minute cap. `0` makes a fallback permanent. |
+| `PYZM_SERVE_WARMUP` | `1` | `0` skips the start-up inference that proves the GPU actually runs a frame. |
+| `PYZM_SERVE_WARMUP_TIMEOUT` | `300` | Seconds the warm-up waits for models to load before giving up. |
 
 Anything you pass after the image name on `docker run` is appended verbatim to the server
 command line, so this table is a convenience, never a boundary:
@@ -257,6 +261,61 @@ someone else's source tree is worse than an open one, because you believe it is 
 | `78` | **Configuration error** — GPU requested with no CUDA device visible, or auth enabled without a password or token secret. The message names the fix. |
 
 `78` is `EX_CONFIG` from `sysexits.h`, so a misconfiguration is distinguishable from a crash.
+
+A failed start-up warm-up (see below) is the one stop that does **not** get its own code: it
+signals the already-running server to shut down, so the container exits `0` as if you had
+stopped it. The log says why, in a block beginning `WARM-UP FAILED`.
+
+### When the GPU degrades
+
+A CUDA error during inference does not always mean the GPU is broken. It can be a one-off:
+on the deployment that produced [issue #1](https://github.com/jantman/docker-pyzm-serve/issues/1)
+a single `CUDA-capable device(s) is/are busy or unavailable` on the first request moved
+every subsequent frame onto the CPU — about 8x slower — for the life of the container,
+while `/health` kept answering `{"status":"ok"}`. Nothing surfaced it.
+
+Three things now stand between you and that:
+
+**The container proves the GPU works before you depend on it.** At start-up, after the
+models load, one synthetic frame is posted to `/infer` and the result is checked against
+`/models`. If that frame does not come back from the processor you asked for, the container
+logs why and stops, so your restart policy recreates it rather than serving degraded. This
+is what makes a green healthcheck mean something on a container that has not yet had
+traffic: until a frame has actually run, `/models` can only report what was *configured*.
+Set `PYZM_SERVE_WARMUP=0` to skip it.
+
+If `PYZM_SERVE_ALLOW_CPU` is set the warm-up still runs and still reports, but it will not
+stop the container — you have already said you might not get a GPU, and a restart loop is no
+way to be told so.
+
+**A degraded container reports itself unhealthy.** `/models` now carries both the processor
+each model is running on and the one it was asked for, and the healthcheck fails when they
+differ:
+
+```console
+$ docker inspect --format '{{.State.Health.Status}}' pyzm-serve
+unhealthy
+$ curl -s localhost:5000/models | jq '.models[] | {name, processor, requested_processor}'
+{ "name": "yolo11m", "processor": "cpu", "requested_processor": "gpu" }
+```
+
+Note that Docker will not act on that by itself — `restart: unless-stopped` does not react
+to health status. It makes the condition visible and alertable; restarting on it needs
+something like a watchdog container, or your monitoring.
+
+**A transient fault heals itself.** After a fallback the GPU is retried 60 seconds later,
+doubling after each further failure up to 15 minutes, so a glitch costs you a minute of
+slow frames rather than an outage. A genuinely dead GPU is not re-probed on every request.
+Tune with `PYZM_SERVE_GPU_RETRY_SECONDS`, or set it to `0` for the old permanent behaviour.
+
+If you would rather fail than be slow, `PYZM_SERVE_NO_CPU_FALLBACK=1` makes `/infer` return
+an error and keeps the model on the GPU. That suits a caller that can retry; it means a
+missed detection rather than a late one, so it is not the default.
+
+`PYZM_SERVE_ALLOW_CPU` has no bearing on any of this. It governs start-up only — whether a
+container with no visible GPU refuses to start — and is deliberately not wired to the
+runtime policy, so that "must start with a GPU" and "may degrade while running" stay
+separate choices.
 
 ### Running without a GPU
 
@@ -367,7 +426,7 @@ semantics. A client written against `pyzm.serve` works here unmodified.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | `{"status": "ok", "models_loaded": true}` |
-| `GET` | `/models` | Available models and their load status |
+| `GET` | `/models` | Available models, their load status, and the processor each is running on vs the one requested |
 | `POST` | `/infer` | Run detection on an uploaded frame |
 | `POST` | `/login` | Obtain a JWT (only meaningful with auth enabled) |
 

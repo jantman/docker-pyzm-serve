@@ -89,7 +89,11 @@ requiring the operator to supply one before the image works would violate Princi
 | `PYZM_SERVE_AUTH_USER` | `admin` | Auth username. |
 | `PYZM_SERVE_AUTH_PASSWORD` | unset | Auth password. Required when auth is on. |
 | `PYZM_SERVE_TOKEN_SECRET` | unset | JWT signing secret. Required when auth is on. |
-| `PYZM_SERVE_ALLOW_CPU` | unset | Downgrades the GPU preflight failure to a warning. |
+| `PYZM_SERVE_ALLOW_CPU` | unset | Downgrades the GPU preflight failure to a warning. Start-up only; it does not affect runtime fallback. |
+| `PYZM_SERVE_NO_CPU_FALLBACK` | unset | Any non-empty value passes `--no-cpu-fallback`: a GPU failure fails the request instead of degrading. |
+| `PYZM_SERVE_GPU_RETRY_SECONDS` | unset (upstream `60`) | Passed to `--gpu-retry-seconds`. Seconds on CPU before the GPU is retried, doubling to a 15-minute cap; `0` makes a fallback permanent. |
+| `PYZM_SERVE_WARMUP` | `1` | `0` skips the start-up warm-up inference. Image-side only; not an upstream flag. |
+| `PYZM_SERVE_WARMUP_TIMEOUT` | `300` | Seconds the warm-up waits for models to load. Image-side only. |
 
 ### Two defaults deliberately differ from upstream
 
@@ -122,14 +126,42 @@ succeeds on a CPU-only build and inference silently falls back, with no log line
 
 `78` is `EX_CONFIG` from `sysexits.h`: a configuration error, distinguishable from a crash.
 
+### Start-up warm-up
+
+After the preflights the entrypoint backgrounds `/opt/warmup.py`, which waits for models to load,
+posts one synthetic frame to upstream's `/infer`, and re-reads `/models`. It stops the container
+(SIGTERM to PID 1) if the frame fails or comes back from a processor other than the requested one.
+
+- The preflight proves a CUDA device is *visible*; only a forward pass proves one is *usable*.
+  Issue #1 is the case where those differ: enumeration succeeded, `cudaMallocManaged` did not.
+- It goes through HTTP on purpose. The fault is per-process, so a forward pass in a separate
+  process before `exec` proves nothing about the process that will serve requests — the existing
+  preflight did exactly that and passed while the server was degraded.
+- **Exit code on warm-up failure is the server's own SIGTERM exit (`0`), not `78`.** PID 1 is
+  upstream's process and the entrypoint has already `exec`'d; the reason is in the log, not the
+  status. A restart policy recreates the container, which is the intended recovery.
+- Skipped by `PYZM_SERVE_WARMUP=0`, and a no-op when `PYZM_SERVE_MODELS=all` loads lazily, since
+  there is then nothing loaded to warm. Both cases log that the GPU is unproven.
+- With `PYZM_SERVE_ALLOW_CPU` set it reports but does not stop the container. That operator was
+  already let past the GPU preflight on the understanding that the GPU may be absent; stopping
+  them here would convert the escape hatch into a restart loop.
+
 ---
 
 ## 7. Healthcheck
 
-The image defines a `HEALTHCHECK` against `GET /health` on the configured port, using Python's
-standard library (no `curl` in the runtime image).
+The image defines a `HEALTHCHECK` against `GET /health` **and** `GET /models` on the configured
+port, using Python's standard library (no `curl` in the runtime image).
 
-- Healthy when upstream returns `{"status": "ok", "models_loaded": true}`.
+- Healthy when upstream returns `{"status": "ok", "models_loaded": true}` **and** no model reports
+  a `processor` different from its `requested_processor`.
+- The processor comparison is what makes a degraded gateway visible: `/health` alone answers `ok`
+  identically whether inference is on the GPU or has fallen back to the CPU, which is how issue #1
+  ran for the life of a container without anything noticing. Both keys are read defensively, so a
+  pyzm predating them (ZoneMinder/pyzmNg#67) degrades to the `/health`-only check rather than
+  failing.
+- `/models` is unauthenticated upstream, so the check works with `PYZM_SERVE_AUTH` on or off.
+- Unhealthy is a report, not an action: Docker restart policies do not react to health status.
 - The start period accommodates model load, including first-load PTX JIT compilation on a GPU newer
   than any the image was built for — which can take tens of seconds. Too short a start period turns
   that supported edge case into a crash loop.

@@ -68,20 +68,51 @@ services:
       # PYZM_SERVE_ALLOW_CPU: "1"
       # PYZM_SERVE_PROCESSOR: cpu
 
-    # The image already defines a HEALTHCHECK against /health on the configured port, with
-    # a start period long enough for model load (including first-load PTX JIT on a GPU
-    # newer than any this image was compiled for). It is repeated here only so that
-    # `docker compose ps` shows health without you having to look it up.
+      # --- What happens if the GPU falters while running ----------------------
+      # By default a CUDA error degrades that model to the CPU and the GPU is retried 60s
+      # later (doubling, to a 15-minute cap). The container goes unhealthy while degraded,
+      # so you can see it. Note ALLOW_CPU above governs start-up only; it has no say here.
+      #
+      # Refuse to answer at all rather than answer slowly. /infer returns an error and the
+      # model stays on the GPU. Choose this if a missed detection is better for you than a
+      # late one:
+      # PYZM_SERVE_NO_CPU_FALLBACK: "1"
+      #
+      # Change the retry delay; 0 makes a fallback permanent for the life of the process:
+      # PYZM_SERVE_GPU_RETRY_SECONDS: "60"
+      #
+      # Skip the start-up inference that proves the GPU can actually run a frame. The
+      # container then starts faster but tells you nothing until real traffic arrives:
+      # PYZM_SERVE_WARMUP: "0"
+
+    # The image already defines this HEALTHCHECK, with a start period long enough for model
+    # load (including first-load PTX JIT on a GPU newer than any this image was compiled
+    # for). It is repeated here only so that `docker compose ps` shows health without you
+    # having to look it up.
+    #
+    # It checks two things. /health proves the server is up and its models are loaded.
+    # /models then compares what each model is running on RIGHT NOW against what it was
+    # asked to run on, and fails the check when they differ -- because /health answers
+    # "ok" just the same when a CUDA error has quietly moved inference onto the CPU.
+    # See the README section "When the GPU degrades".
     healthcheck:
       test:
         - CMD
         - python3
         - -c
         - |
-          import os, urllib.request, sys
-          port = os.environ.get("PYZM_SERVE_PORT", "5000")
-          sys.exit(0 if urllib.request.urlopen(
-              "http://127.0.0.1:" + port + "/health", timeout=8).status == 200 else 1)
+          import json, os, sys, urllib.request as u
+          base = "http://127.0.0.1:" + os.environ.get("PYZM_SERVE_PORT", "5000")
+          if u.urlopen(base + "/health", timeout=8).status != 200:
+              sys.exit(1)
+          models = json.load(u.urlopen(base + "/models", timeout=8))["models"]
+          bad = [m for m in models
+                 if m.get("processor") and m.get("requested_processor")
+                 and m["processor"] != m["requested_processor"]]
+          for m in bad:
+              print("DEGRADED: %s is running on %s, not the requested %s"
+                    % (m["name"], m["processor"], m["requested_processor"]))
+          sys.exit(1 if bad else 0)
       interval: 30s
       timeout: 10s
       start_period: 180s

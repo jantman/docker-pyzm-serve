@@ -11,8 +11,9 @@
 #    `docker build` for nothing.
 #
 # NOTE: `scripts/` and `models/` must NOT be excluded. The Dockerfile COPYs
-# scripts/assert-cuda-build.py, scripts/export-onnx.py, models/checksums.sha256,
-# models/yolov4.cfg and models/coco.names as build inputs.
+# scripts/assert-cuda-build.py, scripts/export-onnx.py, scripts/warmup.py,
+# models/checksums.sha256, models/yolov4.cfg and models/coco.names as build inputs.
+# scripts/warmup.py is the only one of those that also SHIPS, as /opt/warmup.py.
 
 # --- Version control and tooling -------------------------------------------------
 .git/
