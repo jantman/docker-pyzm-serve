@@ -46,10 +46,16 @@ ARG OPENCV_CONTRIB_REF=7deb35fde4d38d73b6173c7ab2aeddc8df5a89e3
 #
 # ###########################################################################
 # # TEMPORARY -- NOT RELEASABLE. This points at a FORK, not upstream:       #
-# #   jantman/pyzmNg @ issues/66, which is ZoneMinder/pyzmNg#67 under       #
-# #   review. It carries the GPU-fallback retry, the `processor` key on     #
-# #   /models, and --no-cpu-fallback, all of which this image now depends   #
-# #   on (see issue #1).                                                    #
+# #   jantman/pyzmNg @ integration/66-68, a merge of the two open PRs:      #
+# #     ZoneMinder/pyzmNg#67 (issues/66) -- GPU-fallback retry, the         #
+# #       `processor` key on /models, and --no-cpu-fallback, all of which   #
+# #       this image depends on (see issue #1).                             #
+# #     ZoneMinder/pyzmNg#69 (issues/68) -- zone_match_strategy. NOT used   #
+# #       by this image: zone filtering is client-side (pyzm.ml.filters),   #
+# #       and no DetectorConfig crosses /infer. Pinned here only so the     #
+# #       gateway and docker-zoneminder run one identical pyzm build.       #
+# #   The two PR branches are independent off master; the merge exists      #
+# #   solely to give an image a single SHA and is never itself PR'd.        #
 # #                                                                         #
 # # Both lines MUST go back to ZoneMinder/pyzmNg at a release tag before    #
 # # any tag is cut here. Principle IV: a release promises a reproducible    #
@@ -57,7 +63,7 @@ ARG OPENCV_CONTRIB_REF=7deb35fde4d38d73b6173c7ab2aeddc8df5a89e3
 # # but the fork itself can vanish or be force-pushed past.                 #
 # ###########################################################################
 ARG PYZM_REPO=https://github.com/jantman/pyzmNg.git
-ARG PYZM_REF=37e4ad392df07a7c621a4523dea84e9611bade9b
+ARG PYZM_REF=271bf98c33c28edca231c0f617d79887acd3a001
 
 # --- Model inputs ------------------------------------------------------------
 # The ultralytics/assets release the two .pt files come from.
