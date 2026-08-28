@@ -62,11 +62,29 @@ docker run --rm --gpus all ubuntu nvidia-smi  # the toolkit is wired into Docker
 If the second command fails, fix that before going any further — the image will refuse to
 start without it, on purpose.
 
+## A note on the `-jantmanfork` suffix
+
+`v0.2.0-jantmanfork` installs `pyzm` from **[jantman/pyzmNg](https://github.com/jantman/pyzmNg)**,
+not from upstream, pinned to a commit that merges two PRs which are Ready for review but not yet
+merged into [ZoneMinder/pyzmNg](https://github.com/ZoneMinder/pyzmNg):
+
+| PR | What it gives this image |
+|---|---|
+| [#67](https://github.com/ZoneMinder/pyzmNg/pull/67) | GPU-fallback retry, the `processor` key on `/models`, `--no-cpu-fallback` — this image depends on all three |
+| [#69](https://github.com/ZoneMinder/pyzmNg/pull/69) | `zone_match_strategy` — unused here (zone filtering is client-side), carried so this image and `docker-zoneminder` run one identical `pyzm` build |
+
+The suffix is there so the tag says so. It is **not** a pre-release: the build is soaked and
+intended for deployment, and takes `latest` like any other release. When both PRs land upstream
+this will be repinned to an upstream release and the suffix dropped.
+
+If you would rather not run a fork, `v0.1.0` is the last release built entirely from upstream
+artifacts — but it predates the GPU-degradation work and cannot detect a silent fallback to CPU.
+
 ## Quickstart
 
 ```bash
 docker run -d --gpus all -p 5000:5000 --name pyzm-serve \
-  ghcr.io/jantman/docker-pyzm-serve:v0.1.0
+  ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork
 ```
 
 Wait for it to become healthy (first start loads the model; see
@@ -126,7 +144,7 @@ substitutes for the others.
 ### 1. Compiled with CUDA (no GPU required — proves what was *built*)
 
 ```bash
-docker run --rm --entrypoint python3 ghcr.io/jantman/docker-pyzm-serve:v0.1.0 \
+docker run --rm --entrypoint python3 ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork \
   -c "import cv2; print([l for l in cv2.getBuildInformation().splitlines() if 'CUDA' in l])"
 ```
 
@@ -141,7 +159,7 @@ inference here — only gets its CUDA backend when cuDNN is present.
 ### 2. A CUDA device is visible (proves what is *available*)
 
 ```bash
-docker run --rm --gpus all --entrypoint python3 ghcr.io/jantman/docker-pyzm-serve:v0.1.0 \
+docker run --rm --gpus all --entrypoint python3 ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork \
   -c "import cv2; print(cv2.__version__); print(cv2.cuda.getCudaEnabledDeviceCount())"
 ```
 
@@ -212,7 +230,7 @@ Anything you pass after the image name on `docker run` is appended verbatim to t
 command line, so this table is a convenience, never a boundary:
 
 ```bash
-docker run --gpus all -p 5000:5000 ghcr.io/jantman/docker-pyzm-serve:v0.1.0 --debug
+docker run --gpus all -p 5000:5000 ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork --debug
 ```
 
 ### Two defaults deliberately differ from upstream
@@ -243,7 +261,7 @@ docker run -d --gpus all -p 5000:5000 \
   -e PYZM_SERVE_AUTH_USER=admin \
   -e PYZM_SERVE_AUTH_PASSWORD='choose-a-real-password' \
   -e PYZM_SERVE_TOKEN_SECRET="$(openssl rand -hex 32)" \
-  ghcr.io/jantman/docker-pyzm-serve:v0.1.0
+  ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork
 ```
 
 The container **refuses to start** (exit `78`) if auth is enabled and either the password or
@@ -324,7 +342,7 @@ Supported for trying the image out, not as a deployment:
 ```bash
 docker run --rm -p 5000:5000 \
   -e PYZM_SERVE_PROCESSOR=cpu -e PYZM_SERVE_ALLOW_CPU=1 \
-  ghcr.io/jantman/docker-pyzm-serve:v0.1.0
+  ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork
 ```
 
 It will warn loudly and run roughly an order of magnitude slower per frame.
@@ -347,7 +365,7 @@ Select a different one without rebuilding:
 
 ```bash
 docker run --gpus all -p 5000:5000 -e PYZM_SERVE_MODELS=yolo11s \
-  ghcr.io/jantman/docker-pyzm-serve:v0.1.0
+  ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork
 ```
 
 `GET /models` on a running container is the authoritative answer for what that image actually
@@ -366,7 +384,7 @@ so the shipped models stay in place, and name your model by its file stem:
 docker run -d --gpus all -p 5000:5000 \
   -v /path/to/my/models:/var/lib/zmeventnotification/models/custom:ro \
   -e PYZM_SERVE_MODELS="yolo11m my-model" \
-  ghcr.io/jantman/docker-pyzm-serve:v0.1.0
+  ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork
 ```
 
 ⚠️ Mounting over `/var/lib/zmeventnotification/models` itself **replaces** the shipped models
@@ -412,7 +430,7 @@ bindings, and the rest Python. **No compiler toolchain is included** — no `gcc
 no `nvcc`. You can check:
 
 ```bash
-docker run --rm --entrypoint sh ghcr.io/jantman/docker-pyzm-serve:v0.1.0 \
+docker run --rm --entrypoint sh ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork \
   -c 'which gcc g++ cmake nvcc || echo "no toolchain: correct"'
 ```
 
@@ -461,7 +479,7 @@ Images are published to **GitHub Container Registry only**. There is no Docker H
 long as anything might pull it — so pin one:
 
 ```yaml
-image: ghcr.io/jantman/docker-pyzm-serve:v0.1.0
+image: ghcr.io/jantman/docker-pyzm-serve:v0.2.0-jantmanfork
 ```
 
 Available releases: <https://github.com/jantman/docker-pyzm-serve/releases>

@@ -45,22 +45,33 @@ ARG OPENCV_CONTRIB_REF=7deb35fde4d38d73b6173c7ab2aeddc8df5a89e3
 # the ref are ARGs so a fork can be tested without editing the pip line below.
 #
 # ###########################################################################
-# # TEMPORARY -- NOT RELEASABLE. This points at a FORK, not upstream:       #
-# #   jantman/pyzmNg @ integration/66-68, a merge of the two open PRs:      #
-# #     ZoneMinder/pyzmNg#67 (issues/66) -- GPU-fallback retry, the         #
-# #       `processor` key on /models, and --no-cpu-fallback, all of which   #
-# #       this image depends on (see issue #1).                             #
-# #     ZoneMinder/pyzmNg#69 (issues/68) -- zone_match_strategy. NOT used   #
-# #       by this image: zone filtering is client-side (pyzm.ml.filters),   #
-# #       and no DetectorConfig crosses /infer. Pinned here only so the     #
-# #       gateway and docker-zoneminder run one identical pyzm build.       #
-# #   The two PR branches are independent off master; the merge exists      #
-# #   solely to give an image a single SHA and is never itself PR'd.        #
-# #                                                                         #
-# # Both lines MUST go back to ZoneMinder/pyzmNg at a release tag before    #
-# # any tag is cut here. Principle IV: a release promises a reproducible    #
-# # artifact, and a fork branch is not one -- the SHA below is immutable    #
-# # but the fork itself can vanish or be force-pushed past.                 #
+# # RELEASED AGAINST A FORK, DELIBERATELY. This points at jantman/pyzmNg,  #
+# # not ZoneMinder/pyzmNg, at integration/66-68 -- a merge of two PRs that #
+# # are Ready for review but not yet merged upstream:                      #
+# #                                                                        #
+# #   ZoneMinder/pyzmNg#67 (issues/66) -- GPU-fallback retry, the          #
+# #     `processor` key on /models, and --no-cpu-fallback, all of which    #
+# #     this image depends on (see issue #1).                              #
+# #   ZoneMinder/pyzmNg#69 (issues/68) -- zone_match_strategy. NOT used by #
+# #     this image: zone filtering is client-side (pyzm.ml.filters), and   #
+# #     no DetectorConfig crosses /infer. Pinned here only so the gateway  #
+# #     and docker-zoneminder run one identical pyzm build.                #
+# #                                                                        #
+# # The two PR branches are independent off master; the merge exists       #
+# # solely to give an image a single SHA and is never itself PR'd.         #
+# #                                                                        #
+# # Why this is allowed to ship. Principle II asks for a full commit SHA,  #
+# # and a fork SHA is one. The reproducibility risk is not the SHA moving  #
+# # -- it cannot -- but the commit becoming UNREACHABLE once the PR        #
+# # branches are deleted after merging, at which point pip could no longer #
+# # fetch it. That is why jantman/pyzmNg carries the annotated tag         #
+# # `image-pin-pr67-pr69` on this exact commit: a tag is a ref, so the     #
+# # commit survives the branch. Do not delete that tag while any released  #
+# # image pins this SHA.                                                   #
+# #                                                                        #
+# # Releases built this way carry the `-jantmanfork` version suffix, which #
+# # release.yml allowlists as a full release. Repin to ZoneMinder/pyzmNg   #
+# # at a release tag once both PRs land upstream, and drop the suffix.     #
 # ###########################################################################
 ARG PYZM_REPO=https://github.com/jantman/pyzmNg.git
 ARG PYZM_REF=271bf98c33c28edca231c0f617d79887acd3a001
