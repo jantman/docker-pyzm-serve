@@ -41,8 +41,40 @@ ARG EXPORT_BASE_IMAGE=python@sha256:a116514e19457bcb7af7efe9c3dd0b9b71e85b317694
 ARG OPENCV_REF=cbee6841638edb6fbc8110df7cd52bb8e3d66211
 # opencv/opencv_contrib tag 4.12.0
 ARG OPENCV_CONTRIB_REF=7deb35fde4d38d73b6173c7ab2aeddc8df5a89e3
-# ZoneMinder/pyzmNg tag v2.5.1
-ARG PYZM_REF=40dbc6449a4794c74e1b9b820024b470b60fa3b2
+# pyzmNg. Normally the tag object of a ZoneMinder/pyzmNg release; both the repository and
+# the ref are ARGs so a fork can be tested without editing the pip line below.
+#
+# ###########################################################################
+# # RELEASED AGAINST A FORK, DELIBERATELY. This points at jantman/pyzmNg,  #
+# # not ZoneMinder/pyzmNg, at integration/66-68 -- a merge of two PRs that #
+# # are Ready for review but not yet merged upstream:                      #
+# #                                                                        #
+# #   ZoneMinder/pyzmNg#67 (issues/66) -- GPU-fallback retry, the          #
+# #     `processor` key on /models, and --no-cpu-fallback, all of which    #
+# #     this image depends on (see issue #1).                              #
+# #   ZoneMinder/pyzmNg#69 (issues/68) -- zone_match_strategy. NOT used by #
+# #     this image: zone filtering is client-side (pyzm.ml.filters), and   #
+# #     no DetectorConfig crosses /infer. Pinned here only so the gateway  #
+# #     and docker-zoneminder run one identical pyzm build.                #
+# #                                                                        #
+# # The two PR branches are independent off master; the merge exists       #
+# # solely to give an image a single SHA and is never itself PR'd.         #
+# #                                                                        #
+# # Why this is allowed to ship. Principle II asks for a full commit SHA,  #
+# # and a fork SHA is one. The reproducibility risk is not the SHA moving  #
+# # -- it cannot -- but the commit becoming UNREACHABLE once the PR        #
+# # branches are deleted after merging, at which point pip could no longer #
+# # fetch it. That is why jantman/pyzmNg carries the annotated tag         #
+# # `image-pin-pr67-pr69` on this exact commit: a tag is a ref, so the     #
+# # commit survives the branch. Do not delete that tag while any released  #
+# # image pins this SHA.                                                   #
+# #                                                                        #
+# # Releases built this way carry the `-jantmanfork` version suffix, which #
+# # release.yml allowlists as a full release. Repin to ZoneMinder/pyzmNg   #
+# # at a release tag once both PRs land upstream, and drop the suffix.     #
+# ###########################################################################
+ARG PYZM_REPO=https://github.com/jantman/pyzmNg.git
+ARG PYZM_REF=271bf98c33c28edca231c0f617d79887acd3a001
 
 # --- Model inputs ------------------------------------------------------------
 # The ultralytics/assets release the two .pt files come from.
@@ -323,6 +355,7 @@ COPY models/yolov4.cfg models/coco.names /out/yolov4/
 # =============================================================================
 FROM ${CUDA_RUNTIME_IMAGE} AS runtime
 
+ARG PYZM_REPO
 ARG PYZM_REF
 ARG NUMPY_VERSION
 
@@ -413,7 +446,7 @@ RUN CV2_VERSION="$(python3 -c 'import cv2; print(cv2.__version__)')" \
 # work, which is what the source build provides. That is why cv2 is installed first.
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     pip install --no-cache-dir \
-        "pyzm[serve] @ git+https://github.com/ZoneMinder/pyzmNg.git@${PYZM_REF}" \
+        "pyzm[serve] @ git+${PYZM_REPO}@${PYZM_REF}" \
         "numpy==${NUMPY_VERSION}" \
     && apt-get purge -y --auto-remove git \
     && rm -rf /var/lib/apt/lists/*
@@ -431,7 +464,8 @@ RUN --mount=type=bind,source=scripts/assert-cuda-build.py,target=/tmp/assert-cud
 # Runtime metadata
 # -----------------------------------------------------------------------------
 COPY entrypoint.sh /opt/entrypoint.sh
-RUN chmod 0555 /opt/entrypoint.sh
+COPY scripts/warmup.py /opt/warmup.py
+RUN chmod 0555 /opt/entrypoint.sh /opt/warmup.py
 
 # Defaults for the whole variable table in contracts/container-interface.md section 5.
 #
@@ -476,8 +510,29 @@ USER 10001:10001
 # newer than any architecture compiled above JIT-compiles the PTX on first model load, which
 # takes tens of seconds. contracts/container-interface.md section 9 promises those cards
 # work; too short a start period would turn that promise into a crash loop.
+#
+# /health ALONE IS NOT ENOUGH (issue #1). It answers {"status":"ok","models_loaded":true}
+# whether inference is running on the GPU or has degraded to the CPU, so a container that
+# had silently become five to eight times slower stayed green for its entire life. The
+# second call compares each model's live `processor` against its `requested_processor` --
+# upstream #67's two new keys -- and fails the check when they differ. That is the only
+# thing that makes "this gateway has degraded to CPU" alertable rather than a latency graph
+# somebody eventually notices.
+#
+# Both keys are read with .get(): against a pyzm that predates #67 they are absent, every
+# model is skipped, and the check degrades to exactly the /health test it replaced rather
+# than reporting a false failure.
+#
+# `/models` needs no token even when PYZM_SERVE_AUTH is on (only `/infer` is behind auth
+# upstream), so this works in every auth configuration.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
-    CMD python3 -c "import os,urllib.request,sys; \
-sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PYZM_SERVE_PORT','5000')+'/health', timeout=8).status==200 else 1)"
+    CMD python3 -c "import json,os,sys,urllib.request as u; \
+b='http://127.0.0.1:'+os.environ.get('PYZM_SERVE_PORT','5000'); \
+sys.exit(1) if u.urlopen(b+'/health', timeout=8).status!=200 else None; \
+d=[m for m in json.load(u.urlopen(b+'/models', timeout=8))['models'] \
+if m.get('processor') and m.get('requested_processor') \
+and m['processor']!=m['requested_processor']]; \
+print('DEGRADED: '+'; '.join(m['name']+' is running on '+m['processor']+', not the requested '+m['requested_processor'] for m in d)) if d else None; \
+sys.exit(1 if d else 0)"
 
 ENTRYPOINT ["/opt/entrypoint.sh"]
