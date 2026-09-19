@@ -44,37 +44,29 @@ ARG OPENCV_CONTRIB_REF=7deb35fde4d38d73b6173c7ab2aeddc8df5a89e3
 # pyzmNg. Normally the tag object of a ZoneMinder/pyzmNg release; both the repository and
 # the ref are ARGs so a fork can be tested without editing the pip line below.
 #
-# ###########################################################################
-# # RELEASED AGAINST A FORK, DELIBERATELY. This points at jantman/pyzmNg,  #
-# # not ZoneMinder/pyzmNg, at integration/66-68 -- a merge of two PRs that #
-# # are Ready for review but not yet merged upstream:                      #
-# #                                                                        #
-# #   ZoneMinder/pyzmNg#67 (issues/66) -- GPU-fallback retry, the          #
-# #     `processor` key on /models, and --no-cpu-fallback, all of which    #
-# #     this image depends on (see issue #1).                              #
-# #   ZoneMinder/pyzmNg#69 (issues/68) -- zone_match_strategy. NOT used by #
-# #     this image: zone filtering is client-side (pyzm.ml.filters), and   #
-# #     no DetectorConfig crosses /infer. Pinned here only so the gateway  #
-# #     and docker-zoneminder run one identical pyzm build.                #
-# #                                                                        #
-# # The two PR branches are independent off master; the merge exists       #
-# # solely to give an image a single SHA and is never itself PR'd.         #
-# #                                                                        #
-# # Why this is allowed to ship. Principle II asks for a full commit SHA,  #
-# # and a fork SHA is one. The reproducibility risk is not the SHA moving  #
-# # -- it cannot -- but the commit becoming UNREACHABLE once the PR        #
-# # branches are deleted after merging, at which point pip could no longer #
-# # fetch it. That is why jantman/pyzmNg carries the annotated tag         #
-# # `image-pin-pr67-pr69` on this exact commit: a tag is a ref, so the     #
-# # commit survives the branch. Do not delete that tag while any released  #
-# # image pins this SHA.                                                   #
-# #                                                                        #
-# # Releases built this way carry the `-jantmanfork` version suffix, which #
-# # release.yml allowlists as a full release. Repin to ZoneMinder/pyzmNg   #
-# # at a release tag once both PRs land upstream, and drop the suffix.     #
-# ###########################################################################
-ARG PYZM_REPO=https://github.com/jantman/pyzmNg.git
-ARG PYZM_REF=271bf98c33c28edca231c0f617d79887acd3a001
+# BACK ON UPSTREAM as of v2.5.3. The two PRs this image was forked for are merged and
+# released:
+#
+#   ZoneMinder/pyzmNg#67 (issues/66) -- GPU-fallback retry, the `processor` key on
+#     /models, and --no-cpu-fallback, all of which this image depends on (issue #1).
+#   ZoneMinder/pyzmNg#69 (issues/68) -- zone_match_strategy. Unused here (zone filtering
+#     is client-side and no DetectorConfig crosses /infer), but it means this image and
+#     docker-zoneminder can again run one identical pyzm build off an upstream tag.
+#
+# Both shipped in v2.5.2. Nothing the fork carried was lost in the merge -- the whole diff
+# under pyzm/ from the old fork pin to v2.5.3 is the version bump, a new `ZoneMatchStrategy`
+# re-export, a readable error when Darknet is asked of an OpenCV built without it (which
+# this image, on OpenCV 4.12 with the DNN module, never hits), and the removal of an
+# unreachable `retry` argument from a private YoloBase method.
+#
+# THE SUPERSEDED FORK PIN STILL MATTERS. v0.2.0-jantmanfork is published and immutable and
+# pins jantman/pyzmNg@271bf98c33c28edca231c0f617d79887acd3a001. Now that both PRs are
+# merged, the branches that commit sits on may be deleted at any time; what keeps it
+# fetchable is the annotated tag `image-pin-pr67-pr69` on it in that fork. Deleting that
+# tag makes a published release unbuildable, so do not delete it.
+ARG PYZM_REPO=https://github.com/ZoneMinder/pyzmNg.git
+# ZoneMinder/pyzmNg tag v2.5.3
+ARG PYZM_REF=c75a4d5a169aeffadca340ac3bd3243f991c607a
 
 # --- Model inputs ------------------------------------------------------------
 # The ultralytics/assets release the two .pt files come from.

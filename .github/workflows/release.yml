@@ -62,14 +62,13 @@ jobs:
           # (FR-024), but it must still not point at something that was never meant to be
           # deployed at all.
           #
-          # `-jantmanfork` is the ONE allowlisted exception, and it is deliberately a
-          # literal rather than a wildcard. Those releases pin pyzm to a fork carrying
-          # PRs still open upstream (see the Dockerfile's PYZM_REF block); the suffix
-          # exists to make that visible in the tag, not to mark the build unfinished.
-          # They are fully soaked, intended for deployment, and so must take `latest`
-          # like any other release. Widening this to `-[a-z]+` would readmit exactly the
-          # v0.0.1-test bug above, so do not.
-          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-jantmanfork)?$ ]]; then
+          # There is no allowlisted exception any more. `-jantmanfork` was one while this
+          # image pinned pyzm to a fork carrying PRs still open upstream; those PRs merged,
+          # the pin is back on a ZoneMinder/pyzmNg release tag (see the Dockerfile's
+          # PYZM_REF block), and the suffix has nothing left to say. If a suffix ever has
+          # to take `latest` again, add it here as a LITERAL -- widening this to `-[a-z]+`
+          # would readmit exactly the v0.0.1-test bug above, so do not.
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             prerelease=false
           else
             prerelease=true

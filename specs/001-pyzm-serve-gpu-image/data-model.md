@@ -32,7 +32,7 @@ Anything external the image is built from. Every instance carries an exact immut
 | CUDA runtime base | base-image | `nvidia/cuda@sha256:2fcc4280646484290cc50dce5e65f388dd04352b07cbe89a635703bd1f9aedb6` (`12.4.1-cudnn-runtime-ubuntu22.04`) | `CUDA_RUNTIME_IMAGE` |
 | OpenCV | git-checkout | tag `4.12.0`, resolved to a full SHA | `OPENCV_REF` |
 | opencv_contrib | git-checkout | tag `4.12.0`, resolved to a full SHA | `OPENCV_CONTRIB_REF` |
-| pyzmNg | git-checkout | tag `v2.5.1`, resolved to a full SHA | `PYZM_REF` |
+| pyzmNg | git-checkout | tag `v2.5.3`, resolved to a full SHA | `PYZM_REF` |
 | `yolo11m.pt` | model-weights | `ultralytics/assets` release `v8.4.0` asset + SHA-256 | `YOLO11_ASSETS_REF` |
 | `yolo11s.pt` | model-weights | same release + SHA-256 | `YOLO11_ASSETS_REF` |
 | `yolov4.weights` | model-weights | `AlexeyAB/darknet` release `darknet_yolo_v3_optimal` + SHA-256 | `YOLOV4_WEIGHTS_URL` |
