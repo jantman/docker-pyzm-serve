@@ -16,7 +16,7 @@ services:
   pyzm-serve:
     # Pin a release tag, or better, a digest. Do NOT deploy `latest`: it moves.
     # Available releases: https://github.com/jantman/docker-pyzm-serve/releases
-    image: ghcr.io/jantman/docker-pyzm-serve:v0.1.0
+    image: ghcr.io/jantman/docker-pyzm-serve:v0.3.0
 
     container_name: pyzm-serve
     restart: unless-stopped
